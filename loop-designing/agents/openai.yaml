@@ -1,0 +1,4 @@
+interface:
+  display_name: "Loop Designing"
+  short_description: "Run a persistent human design loop"
+  default_prompt: "Use $loop-designing to turn my requirement and references into three concepts, implementation, evaluation, and a human verdict."
