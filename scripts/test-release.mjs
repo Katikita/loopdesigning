@@ -61,11 +61,23 @@ try {
   rejects("malformed-frontmatter-brackets", (skill) => {
     fs.writeFileSync(path.join(skill, "SKILL.md"), "---\nname: loop-designing\ndescription: [unterminated\n---\n\n# Instructions\n");
   });
+  rejects("comment-only-description", (skill) => {
+    fs.writeFileSync(path.join(skill, "SKILL.md"), "---\nname: loop-designing\ndescription: # comment only\n---\n\n# Instructions\n");
+  });
+  rejects("boolean-description", (skill) => {
+    fs.writeFileSync(path.join(skill, "SKILL.md"), "---\nname: loop-designing\ndescription: true\n---\n\n# Instructions\n");
+  });
   rejects("malformed-agent-metadata", (skill) => {
     fs.writeFileSync(path.join(skill, "agents", "openai.yaml"), "interface:\n  display_name: \"unterminated\n");
   });
   rejects("malformed-agent-structure", (skill) => {
     fs.writeFileSync(path.join(skill, "agents", "openai.yaml"), "interface:\n display_name: Loop Designing\n");
+  });
+  rejects("boolean-agent-metadata", (skill) => {
+    fs.writeFileSync(path.join(skill, "agents", "openai.yaml"), "interface:\n  display_name: true\n");
+  });
+  rejects("null-agent-metadata", (skill) => {
+    fs.writeFileSync(path.join(skill, "agents", "openai.yaml"), "interface:\n  display_name: # comment only\n");
   });
 
   process.stdout.write("Loop Designing release regression test passed.\n");

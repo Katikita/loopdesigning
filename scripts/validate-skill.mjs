@@ -56,7 +56,7 @@ function assertSymlinkFreeTree(directory) {
 function scalar(value, label) {
   const trimmed = value.trim();
   if (!trimmed) fail(`${label} must be a non-empty scalar`);
-  if (/^[>|&*!]/.test(trimmed)) fail(`${label} must be a single-line scalar`);
+  if (/^[>#|&*!]/.test(trimmed)) fail(`${label} must be a non-empty string scalar`);
   if (trimmed.startsWith('"')) {
     try {
       const parsed = JSON.parse(trimmed);
@@ -77,6 +77,12 @@ function scalar(value, label) {
   const plain = trimmed.replace(/\s+#.*$/, "").trim();
   if (!plain || /[\[\]{}]/.test(plain) || /:\s/.test(plain) || /[\r\n\t]/.test(plain)) {
     fail(`${label} must be a valid plain scalar`);
+  }
+  if (/^(?:~|null|true|false|yes|no|on|off)$/i.test(plain)
+    || /^[-+]?(?:0|[1-9][0-9_]*)(?:\.[0-9_]*)?(?:[eE][-+]?[0-9_]+)?$/.test(plain)
+    || /^[-+]?\.(?:inf|nan)$/i.test(plain)
+    || /^[-+]?0[xob][0-9a-f_]+$/i.test(plain)) {
+    fail(`${label} must be a string, not a YAML null, boolean, or numeric value`);
   }
   return plain;
 }
