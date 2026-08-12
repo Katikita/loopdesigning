@@ -11,6 +11,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const cli = path.join(here, "loop.mjs");
 const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-test-"));
 const guardWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-guard-test-"));
+const cleanLockWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-clean-lock-test-"));
 const invalidWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-invalid-test-"));
 const symlinkWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-symlink-test-"));
 const symlinkOutside = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-outside-test-"));
@@ -443,6 +444,20 @@ fs.writeFileSync = function(file, value, options) {
     checks: [],
     checkEnvAllowlist: [],
   };
+  const cleanLockConfig = { ...guardConfig, projectId: "clean-lock-test", runsDir: "loop designing runs" };
+  fs.writeFileSync(path.join(cleanLockWorkspace, "loop-designing.config.json"), `${JSON.stringify(cleanLockConfig, null, 2)}\n`);
+  fs.writeFileSync(path.join(cleanLockWorkspace, "principles.md"), "Prefer clear hierarchy.\n");
+  fs.writeFileSync(path.join(cleanLockWorkspace, "requirement.md"), "Start from a clean Git workspace.\n");
+  fs.writeFileSync(path.join(cleanLockWorkspace, "reference-screen.md"), "Clean workspace reference screen.\n");
+  assert.equal(spawnSync("git", ["init"], { cwd: cleanLockWorkspace }).status, 0);
+  assert.equal(spawnSync("git", ["add", "."], { cwd: cleanLockWorkspace }).status, 0);
+  assert.equal(spawnSync("git", ["-c", "user.name=Loop Test", "-c", "user.email=loop@example.test", "commit", "-m", "baseline"], { cwd: cleanLockWorkspace }).status, 0);
+  const cleanLockStarted = runAt(cleanLockWorkspace, ["start", "--id", "LD-clean-lock", "--requirement-file", path.join(cleanLockWorkspace, "requirement.md"), "--ref", "reference-screen.md"]);
+  assert.equal(cleanLockStarted.state, "awaiting-concepts");
+  const cleanLockState = JSON.parse(fs.readFileSync(path.join(cleanLockWorkspace, "loop designing runs", "LD-clean-lock", "state.json"), "utf8"));
+  assert.equal(cleanLockState.baseline.status, "");
+  assert.equal(fs.existsSync(path.join(cleanLockWorkspace, "loop designing runs", ".harness.lock")), false);
+
   fs.writeFileSync(path.join(guardWorkspace, "loop-designing.config.json"), `${JSON.stringify(guardConfig, null, 2)}\n`);
   fs.writeFileSync(path.join(guardWorkspace, "principles.md"), "Prefer clear hierarchy.\n");
   fs.writeFileSync(path.join(guardWorkspace, "requirement.md"), "Test the dirty-worktree guard.\n");
@@ -483,6 +498,7 @@ fs.writeFileSync = function(file, value, options) {
 } finally {
   fs.rmSync(workspace, { recursive: true, force: true });
   fs.rmSync(guardWorkspace, { recursive: true, force: true });
+  fs.rmSync(cleanLockWorkspace, { recursive: true, force: true });
   fs.rmSync(invalidWorkspace, { recursive: true, force: true });
   fs.rmSync(symlinkWorkspace, { recursive: true, force: true });
   fs.rmSync(symlinkOutside, { recursive: true, force: true });

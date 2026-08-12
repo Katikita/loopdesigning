@@ -698,11 +698,12 @@ function snapshotContext(workspace, config, runDir, requirement, designContext, 
   writeJson(descendant(contextDir, "context manifest", "manifest.json"), { sources, designContext, approvedMemory: approved, rejectedMemory: rejected });
 }
 
-function gitSnapshot(workspace) {
+function gitSnapshot(workspace, excludedPaths = []) {
   const inside = spawnSync("git", ["rev-parse", "--is-inside-work-tree"], { cwd: workspace, encoding: "utf8" });
   if (inside.status !== 0 || inside.stdout.trim() !== "true") return { isGit: false, head: null, dirty: false, status: "" };
   const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: workspace, encoding: "utf8" });
-  const status = spawnSync("git", ["status", "--short"], { cwd: workspace, encoding: "utf8" });
+  const pathspec = [".", ...excludedPaths.map((file) => `:(exclude)${relative(workspace, file)}`)];
+  const status = spawnSync("git", ["status", "--short", "--", ...pathspec], { cwd: workspace, encoding: "utf8" });
   const statusText = status.status === 0 ? status.stdout : "";
   return {
     isGit: true,
@@ -755,7 +756,7 @@ function commandStart(workspace, config, args) {
   const requirement = requirementFile ? readText(requirementFile) : args.requirement;
   if (!requirement || !String(requirement).trim()) die("Provide --requirement-file or --requirement");
   const tags = list(args.tag).map(String);
-  const baseline = gitSnapshot(workspace);
+  const baseline = gitSnapshot(workspace, [descendant(resolved.runsDir, "transition lock", ".harness.lock")]);
   if (config.requireCleanWorktree && baseline.isGit && baseline.dirty && !args["allow-dirty"]) {
     die("The workspace has uncommitted changes. Commit/stash them or explicitly use --allow-dirty when they belong to this run.", baseline.status);
   }
