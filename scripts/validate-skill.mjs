@@ -6,6 +6,7 @@ import path from "node:path";
 const target = process.argv[2];
 const hyphenCase = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const requiredScripts = ["scripts/loop.mjs", "scripts/test-harness.mjs"];
+const requiredReferences = ["references/visual-fidelity-contract.md"];
 const interfaceKeys = new Set(["display_name", "short_description", "default_prompt"]);
 
 function fail(message) {
@@ -139,6 +140,7 @@ function validate(skillDirectory) {
     fail(`SKILL.md name must match its folder name (${folderName}), received ${fields.get("name")}`);
   }
   for (const script of requiredScripts) requireRegularFile(path.join(skillDirectory, script), `required script ${script}`);
+  for (const reference of requiredReferences) requireRegularFile(path.join(skillDirectory, reference), `required reference ${reference}`);
   validateAgentMetadata(path.join(skillDirectory, "agents", "openai.yaml"), folderName);
 }
 

@@ -38,6 +38,9 @@ try {
 
   rejects("missing-skill", (skill) => fs.rmSync(path.join(skill, "SKILL.md")));
   rejects("missing-cli", (skill) => fs.rmSync(path.join(skill, "scripts", "loop.mjs")));
+  rejects("missing-visual-fidelity-contract", (skill) => {
+    fs.rmSync(path.join(skill, "references", "visual-fidelity-contract.md"));
+  });
   rejects("final-script-symlink", (skill) => {
     const cli = path.join(skill, "scripts", "loop.mjs");
     const external = path.join(path.dirname(skill), "external-loop.mjs");
