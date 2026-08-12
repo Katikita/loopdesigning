@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const cli = path.join(here, "loop.mjs");
@@ -66,9 +66,9 @@ try {
   const unsupportedSchemaForceInit = runAt(onboardingWorkspace, ["init", "--force"]);
   assert.deepEqual(unsupportedSchemaForceInit.generatedPaths, ["loop-designing.config.json"]);
   assert.equal(fs.readFileSync(path.join(onboardingWorkspace, "project-context.md"), "utf8"), "Keep this product knowledge.\n");
-  const concurrentPreload = path.join(concurrentInitWorkspace, "create-project-context-race.mjs");
-  fs.writeFileSync(concurrentPreload, `import fs from "node:fs";
-import path from "node:path";
+  const concurrentPreload = path.join(concurrentInitWorkspace, "create-project-context-race.cjs");
+  fs.writeFileSync(concurrentPreload, `const fs = require("node:fs");
+const path = require("node:path");
 const originalWriteFileSync = fs.writeFileSync.bind(fs);
 let competingWriteComplete = false;
 fs.writeFileSync = function(file, value, options) {
@@ -82,7 +82,7 @@ fs.writeFileSync = function(file, value, options) {
 };
 `);
   const concurrentInit = runAt(concurrentInitWorkspace, ["init"], 0, {
-    env: { ...process.env, NODE_OPTIONS: `--import=${pathToFileURL(concurrentPreload).href}` },
+    env: { ...process.env, NODE_OPTIONS: `--require=${concurrentPreload}` },
   });
   assert.equal(fs.readFileSync(path.join(concurrentInitWorkspace, "project-context.md"), "utf8"), "Keep concurrent knowledge.\n");
   assert.deepEqual(concurrentInit.generatedPaths, ["loop-designing.config.json"]);
