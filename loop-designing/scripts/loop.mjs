@@ -174,6 +174,17 @@ function writeTextNew(file, value) {
   }
 }
 
+function writeTextIfMissing(file, value) {
+  ensureDir(path.dirname(file));
+  try {
+    fs.writeFileSync(file, value, { flag: "wx" });
+    return true;
+  } catch (error) {
+    if (error.code === "EEXIST") return false;
+    die(`Cannot write ${file}`, error.message);
+  }
+}
+
 function pathExists(pathname) {
   try {
     fs.lstatSync(pathname);
@@ -726,8 +737,7 @@ function commandInit(workspace, args) {
   };
   writeJson(configFile, initial);
   const generatedPaths = [relative(workspace, configFile)];
-  if (!fs.existsSync(projectContextFile)) {
-    writeText(projectContextFile, "# Project context\n\n## Product purpose\n\n## Primary users\n\n## Current experience\n\n## Product and technical constraints\n\n## Success criteria\n");
+  if (writeTextIfMissing(projectContextFile, "# Project context\n\n## Product purpose\n\n## Primary users\n\n## Current experience\n\n## Product and technical constraints\n\n## Success criteria\n")) {
     generatedPaths.push(relative(workspace, projectContextFile));
   }
   output({ action: "init", config: relative(workspace, configFile), generatedPaths });

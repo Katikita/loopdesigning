@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const cli = path.join(here, "loop.mjs");
@@ -15,6 +15,7 @@ const invalidWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-i
 const symlinkWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-symlink-test-"));
 const symlinkOutside = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-outside-test-"));
 const onboardingWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-onboarding-test-"));
+const concurrentInitWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-concurrent-init-test-"));
 
 function write(relativePath, value) {
   const file = path.join(workspace, relativePath);
@@ -23,8 +24,8 @@ function write(relativePath, value) {
   return file;
 }
 
-function runAt(cwd, args, expectedStatus = 0) {
-  const result = spawnSync(process.execPath, [cli, ...args], { cwd, encoding: "utf8" });
+function runAt(cwd, args, expectedStatus = 0, options = {}) {
+  const result = spawnSync(process.execPath, [cli, ...args], { cwd, encoding: "utf8", ...options });
   assert.equal(result.status, expectedStatus, `Command failed: ${args.join(" ")}\n${result.stdout}\n${result.stderr}`);
   const stream = expectedStatus === 0 ? result.stdout : result.stderr;
   return JSON.parse(stream);
@@ -65,6 +66,26 @@ try {
   const unsupportedSchemaForceInit = runAt(onboardingWorkspace, ["init", "--force"]);
   assert.deepEqual(unsupportedSchemaForceInit.generatedPaths, ["loop-designing.config.json"]);
   assert.equal(fs.readFileSync(path.join(onboardingWorkspace, "project-context.md"), "utf8"), "Keep this product knowledge.\n");
+  const concurrentPreload = path.join(concurrentInitWorkspace, "create-project-context-race.mjs");
+  fs.writeFileSync(concurrentPreload, `import fs from "node:fs";
+import path from "node:path";
+const originalWriteFileSync = fs.writeFileSync.bind(fs);
+let competingWriteComplete = false;
+fs.writeFileSync = function(file, value, options) {
+  const projectContext = path.join(process.cwd(), "project-context.md");
+  const pathname = String(file);
+  if (!competingWriteComplete && (pathname === projectContext || pathname.startsWith(projectContext + ".tmp-"))) {
+    originalWriteFileSync(projectContext, "Keep concurrent knowledge.\\n");
+    competingWriteComplete = true;
+  }
+  return originalWriteFileSync(file, value, options);
+};
+`);
+  const concurrentInit = runAt(concurrentInitWorkspace, ["init"], 0, {
+    env: { ...process.env, NODE_OPTIONS: `--import=${pathToFileURL(concurrentPreload).href}` },
+  });
+  assert.equal(fs.readFileSync(path.join(concurrentInitWorkspace, "project-context.md"), "utf8"), "Keep concurrent knowledge.\n");
+  assert.deepEqual(concurrentInit.generatedPaths, ["loop-designing.config.json"]);
   onboardingConfig.runsDir = "runs";
   onboardingConfig.requireCleanWorktree = false;
   fs.writeFileSync(path.join(onboardingWorkspace, "loop-designing.config.json"), `${JSON.stringify(onboardingConfig, null, 2)}\n`);
@@ -466,4 +487,5 @@ try {
   fs.rmSync(symlinkWorkspace, { recursive: true, force: true });
   fs.rmSync(symlinkOutside, { recursive: true, force: true });
   fs.rmSync(onboardingWorkspace, { recursive: true, force: true });
+  fs.rmSync(concurrentInitWorkspace, { recursive: true, force: true });
 }
