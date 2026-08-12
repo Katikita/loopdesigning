@@ -142,7 +142,7 @@ node loop-designing/scripts/loop.mjs start \
   --design-context accessibility=./design/accessibility.md
 ```
 
-All three groups are optional, but at least one local workspace file or HTTP(S) URL is required. The harness reports any remaining groups as sparse context; it does not require every kind.
+All three groups are optional, but at least one local workspace file or HTTP(S) URL is required. The harness reports any remaining groups as optional gaps and warns when only one source is supplied; it does not require every kind.
 
 On first use, the skill creates `loop-designing.config.json` in the host workspace. Review it to define:
 

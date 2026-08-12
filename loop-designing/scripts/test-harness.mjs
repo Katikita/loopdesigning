@@ -89,6 +89,24 @@ try {
   const everyKindSnapshot = fs.readFileSync(path.join(onboardingWorkspace, "runs", "LD-every-kind", "context", "context.md"), "utf8");
   assert.match(everyKindSnapshot, /## Design context\n\n### Design system[\s\S]*### Reference screens[\s\S]*### Design rules/);
   assert.ok(everyKindSnapshot.indexOf("## Design context") < everyKindSnapshot.indexOf("## Retrieved approved memory"));
+  for (const expected of [
+    "- [tokens] runs/LD-every-kind/references/tokens.md",
+    "- [typography] runs/LD-every-kind/references/typography.md",
+    "- [layout] https://example.test/layout",
+    "- [components] runs/LD-every-kind/references/components.md",
+    "- [reference-screen] runs/LD-every-kind/references/reference-screen.md",
+    "- [approved-decisions] runs/LD-every-kind/references/approved-decisions.md",
+    "- [rejected-patterns] runs/LD-every-kind/references/rejected-patterns.md",
+    "- [accessibility] runs/LD-every-kind/references/accessibility.md",
+  ]) assert.match(everyKindSnapshot, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  const twoSources = runAt(onboardingWorkspace, [
+    "start", "--id", "LD-two-sources", "--force-new", "--requirement-file", onboardingRequirement,
+    "--design-context", "tokens=fixtures/tokens.md",
+    "--ref", "fixtures/reference-screen.md",
+  ]);
+  assert.equal(twoSources.designContextSummary.sourceCount, 2);
+  assert.deepEqual(twoSources.designContextSummary.missingGroups, ["design-rules"]);
+  assert.equal(twoSources.designContextSummary.sparseWarning, "");
   const malformedContext = runAt(onboardingWorkspace, ["start", "--id", "LD-malformed-context", "--requirement-file", onboardingRequirement, "--design-context", "tokens"], 1);
   assert.match(malformedContext.error, /Design context entries must use kind=source/);
   assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-malformed-context")), false);
@@ -97,10 +115,20 @@ try {
   assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-missing-kind")), false);
   const unknownKind = runAt(onboardingWorkspace, ["start", "--id", "LD-unknown-kind", "--requirement-file", onboardingRequirement, "--design-context", "unknown=fixtures/tokens.md"], 1);
   assert.match(unknownKind.error, /Unknown design context kind/);
+  assert.deepEqual(unknownKind.details, {
+    kind: "unknown",
+    supportedKinds: ["tokens", "typography", "layout", "components", "reference-screen", "approved-decisions", "rejected-patterns", "accessibility"],
+  });
   assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-unknown-kind")), false);
   const emptySource = runAt(onboardingWorkspace, ["start", "--id", "LD-empty-source", "--requirement-file", onboardingRequirement, "--design-context", "tokens="], 1);
   assert.match(emptySource.error, /Design context source is required/);
   assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-empty-source")), false);
+  const malformedUrl = runAt(onboardingWorkspace, ["start", "--id", "LD-malformed-url", "--force-new", "--requirement-file", onboardingRequirement, "--design-context", "layout=https://"], 1);
+  assert.match(malformedUrl.error, /valid HTTP\(S\) URL/);
+  assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-malformed-url")), false);
+  const controlCharacterUrl = runAt(onboardingWorkspace, ["start", "--id", "LD-control-character-url", "--force-new", "--requirement-file", onboardingRequirement, "--design-context", "layout=https://example.test/x\n\n## Injected heading"], 1);
+  assert.match(controlCharacterUrl.error, /control characters/);
+  assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-control-character-url")), false);
   const duplicateSource = runAt(onboardingWorkspace, ["start", "--id", "LD-duplicate-source", "--requirement-file", onboardingRequirement, "--ref", "fixtures/reference-screen.md", "--ref", "fixtures/reference-screen.md"], 1);
   assert.match(duplicateSource.error, /Duplicate design context kind\/source/);
   assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-duplicate-source")), false);

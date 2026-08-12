@@ -70,9 +70,9 @@ Every new run needs at least one concrete design-context source. Inventory the t
 
 `--design-context` is repeatable. Each value splits on its first `=` so a URL may contain `=`. `--ref <path-or-url>` remains repeatable for compatibility and is equivalent to `--design-context reference-screen=<path-or-url>`.
 
-Local sources must be workspace-relative, stay inside the workspace after symlink resolution, exist, and be readable. The harness copies them into the run. HTTP(S) sources are retained as URL metadata and are never fetched. Reusing the same kind/source pair is rejected as a duplicate.
+Local sources must be workspace-relative, stay inside the workspace after symlink resolution, exist, and be readable. The harness copies them into the run. HTTP(S) sources must be valid URLs with a hostname and no control characters; they are normalized, retained as URL metadata, and never fetched. Reusing the same kind/source pair is rejected as a duplicate.
 
-The start result and `references/design-context.json` report `sourceCount`, `suppliedKinds`, `missingGroups`, and `sparseWarning`. Missing groups are optional; `sparseWarning` is non-empty whenever any group is absent.
+The start result and `references/design-context.json` report `sourceCount`, `suppliedKinds`, `missingGroups`, and `sparseWarning`. Missing groups are optional; `sparseWarning` is non-empty when exactly one source is supplied. The generated context snapshot labels every source with its structured kind.
 
 Minimal input:
 

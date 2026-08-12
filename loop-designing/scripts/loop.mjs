@@ -74,7 +74,7 @@ function designContextSummary(entries) {
     sourceCount: entries.length,
     suppliedKinds,
     missingGroups,
-    sparseWarning: missingGroups.length ? `Design context is sparse; missing ${missingGroups.join(", ")}.` : "",
+    sparseWarning: entries.length === 1 ? `Design context is sparse; missing ${missingGroups.join(", ")}.` : "",
   };
 }
 
@@ -93,16 +93,27 @@ function parseDesignContextArgs(args) {
   const seen = new Set();
   const entries = supplied.map(({ kind, source }) => {
     if (!kind) die("Design context kind is required");
-    if (!Object.hasOwn(DESIGN_CONTEXT_GROUPS, kind)) die("Unknown design context kind", kind);
+    if (!Object.hasOwn(DESIGN_CONTEXT_GROUPS, kind)) die("Unknown design context kind", { kind, supportedKinds: Object.keys(DESIGN_CONTEXT_GROUPS) });
     if (typeof source !== "string" || !source.trim()) die("Design context source is required", kind);
-    const value = source.trim();
+    let value = source.trim();
+    if (/[\u0000-\u001f\u007f]/.test(value)) die("Design context source must not contain control characters", kind);
+    const type = /^https?:\/\//i.test(value) ? "url" : "file";
+    if (type === "url") {
+      try {
+        const parsed = new URL(value);
+        if (!["http:", "https:"].includes(parsed.protocol) || !parsed.hostname) throw new Error("Missing HTTP(S) hostname");
+        value = parsed.href;
+      } catch {
+        die("Design context URL must be a valid HTTP(S) URL", value);
+      }
+    }
     const duplicateKey = `${kind}\u0000${value}`;
     if (seen.has(duplicateKey)) die("Duplicate design context kind/source", { kind, source: value });
     seen.add(duplicateKey);
     return {
       kind,
       group: DESIGN_CONTEXT_GROUPS[kind],
-      type: /^https?:\/\//i.test(value) ? "url" : "file",
+      type,
       value,
     };
   });
@@ -610,7 +621,7 @@ function retrieveMemory(entries, config, tags) {
 }
 
 function snapshotContext(workspace, config, runDir, requirement, designContext, tags, approved, rejected) {
-  const labelEntry = (entry) => `- ${entry.type === "file" ? entry.stored : entry.value}`;
+  const labelEntry = (entry) => `- [${entry.kind}] ${entry.type === "file" ? entry.stored : entry.value}`;
   const entriesFor = (group) => designContext.entries.filter((entry) => entry.group === group);
   const sections = [
     "# Loop Designing context snapshot",
