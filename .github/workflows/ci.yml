@@ -23,6 +23,8 @@ jobs:
       - run: node --check loop-designing/scripts/test-harness.mjs
       - run: node --check scripts/validate-skill.mjs
       - run: node --check scripts/verify-clean-install.mjs
+      - run: node --check scripts/test-release.mjs
       - run: node loop-designing/scripts/test-harness.mjs
+      - run: node scripts/test-release.mjs
       - run: node scripts/validate-skill.mjs loop-designing
       - run: node scripts/verify-clean-install.mjs loop-designing

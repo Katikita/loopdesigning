@@ -32,14 +32,53 @@ function requireRegularFile(file, label) {
   if (!stat.isFile()) fail(`${label} must be a non-symlink regular file: ${path.relative(process.cwd(), file) || file}`);
 }
 
+function assertSymlinkFreeTree(directory) {
+  let rootStat;
+  try {
+    rootStat = fs.lstatSync(directory);
+  } catch (error) {
+    if (error.code === "ENOENT") fail(`Skill directory does not exist: ${directory}`);
+    throw error;
+  }
+  if (!rootStat.isDirectory()) fail(`Skill directory must be a non-symlink directory: ${directory}`);
+  const visit = (current) => {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const candidate = path.join(current, entry.name);
+      const stat = fs.lstatSync(candidate);
+      if (stat.isSymbolicLink()) fail(`Skill directory must not contain symlinks: ${path.relative(directory, candidate)}`);
+      if (stat.isDirectory()) visit(candidate);
+      else if (!stat.isFile()) fail(`Skill directory may contain only regular files and directories: ${path.relative(directory, candidate)}`);
+    }
+  };
+  visit(directory);
+}
+
 function scalar(value, label) {
   const trimmed = value.trim();
   if (!trimmed) fail(`${label} must be a non-empty scalar`);
-  if (/^[>|]/.test(trimmed)) fail(`${label} must be a single-line scalar`);
-  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
-    return trimmed.slice(1, -1).trim();
+  if (/^[>|&*!]/.test(trimmed)) fail(`${label} must be a single-line scalar`);
+  if (trimmed.startsWith('"')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (typeof parsed !== "string" || !parsed.trim()) fail(`${label} must be a non-empty string`);
+      return parsed.trim();
+    } catch {
+      fail(`${label} has an invalid double-quoted scalar`);
+    }
   }
-  return trimmed.replace(/\s+#.*$/, "").trim();
+  if (trimmed.startsWith("'")) {
+    if (!trimmed.endsWith("'")) fail(`${label} has an unterminated single-quoted scalar`);
+    const content = trimmed.slice(1, -1);
+    if (/(^|[^'])'([^']|$)/.test(content)) fail(`${label} has an invalid single-quoted scalar`);
+    const parsed = content.replace(/''/g, "'").trim();
+    if (!parsed) fail(`${label} must be a non-empty string`);
+    return parsed;
+  }
+  const plain = trimmed.replace(/\s+#.*$/, "").trim();
+  if (!plain || /[\[\]{}]/.test(plain) || /:\s/.test(plain) || /[\r\n\t]/.test(plain)) {
+    fail(`${label} must be a valid plain scalar`);
+  }
+  return plain;
 }
 
 function parseFrontmatter(source) {
@@ -86,9 +125,7 @@ function validateAgentMetadata(file, skillName) {
 }
 
 function validate(skillDirectory) {
-  if (!fs.existsSync(skillDirectory) || !fs.statSync(skillDirectory).isDirectory()) {
-    fail(`Skill directory does not exist: ${skillDirectory}`);
-  }
+  assertSymlinkFreeTree(skillDirectory);
   const folderName = path.basename(skillDirectory);
   if (!hyphenCase.test(folderName)) fail(`Skill folder must use hyphen-case: ${folderName}`);
   const fields = parseFrontmatter(readFile(path.join(skillDirectory, "SKILL.md"), "SKILL.md"));
