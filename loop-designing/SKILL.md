@@ -64,8 +64,8 @@ Read these references when their stage applies:
 
 ### 4. Evaluate
 
-- Inspect the exact configured check commands, timeout, and environment allowlist. If checks exist, show the fingerprint returned by the first `evaluate --run <id>` call and obtain explicit human approval before rerunning with `--checks-sha256 <fingerprint>`. Approval authorizes those commands to run with the user's filesystem permissions.
-- Run the approved evaluation to build the evaluation packet. Never reuse approval after the check fingerprint changes.
+- Inspect the exact configured check commands, timeout, and environment allowlist. If checks exist and the run has no approval for their exact fingerprint, show the fingerprint returned by `evaluate --run <id>` and obtain explicit human approval before rerunning with `--checks-sha256 <fingerprint>`. Approval authorizes those exact commands to run with the user's filesystem permissions.
+- Run the approved evaluation to build the evaluation packet. The harness reuses an existing approval only while the fingerprint is unchanged; a changed command, timeout, or environment allowlist requires new approval.
 - Read the complete packet and inspect visual evidence or the running interface when UI changed.
 - Write an evidence-backed report and an exact memory proposal using the reference schemas.
 - Register them with `record-evaluation --run <id> --report <path> --memory-proposal <path>`. Use `{ "entries": [] }` when there is no reusable learning.
@@ -73,10 +73,10 @@ Read these references when their stage applies:
 
 ### 5. Record the final verdict
 
-- Record `pass`, `iterate-implementation`, `iterate-concepts`, or `archive` with `verdict`.
+- Record `pass`, `retry-evaluation`, `iterate-implementation`, `iterate-concepts`, or `archive` with `verdict`.
 - A passing verdict must include `--memory-action approve` or `--memory-action skip`.
 - Promote only the proposal shown before the verdict. Never convert raw conversation or evaluator opinion into canonical memory.
-- Route implementation defects back to implementation and direction defects back to concepts.
+- Route an invalid check configuration, transient check-environment failure, or faulty evaluation report to `retry-evaluation`; this preserves the selected concept and implementation and creates a new evaluation attempt. Route implementation defects back to implementation and direction defects back to concepts.
 
 ## Non-negotiable gates
 

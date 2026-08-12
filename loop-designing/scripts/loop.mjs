@@ -790,6 +790,7 @@ function commandStart(workspace, config, args) {
     status: "awaiting-concepts",
     iteration: 1,
     implementationAttempt: 0,
+    evaluationAttempt: 0,
     createdAt,
     updatedAt: createdAt,
     tags,
@@ -979,6 +980,7 @@ function commandImplemented(workspace, config, args) {
     die("At least one valid PNG, JPG, or WebP --evidence file is required by project config");
   }
   state.implementationAttempt += 1;
+  state.evaluationAttempt = 0;
   const implementationDir = descendant(runDir, "implementation directory", "implementation", `iteration-${state.iteration}-attempt-${state.implementationAttempt}`);
   ensureDir(implementationDir);
   const summaryFile = descendant(implementationDir, "implementation summary", "summary.md");
@@ -1058,9 +1060,11 @@ function commandEvaluate(workspace, config, args) {
   const { runDir, stateFile, state } = getState(workspace, config, args.run);
   requireState(state, "awaiting-evaluation");
   let checkApproval = null;
+  let approval = "not-required";
   if (config.checks.length) {
     const expected = checkApprovalFingerprint(config);
-    if (args["checks-sha256"] !== expected) {
+    const previousApproval = state.checkApproval?.sha256 === expected ? state.checkApproval : null;
+    if (args["checks-sha256"] !== expected && !previousApproval) {
       die("Configured checks can execute programs. Review the exact commands and environment allowlist, obtain explicit human approval, then rerun with --checks-sha256 <fingerprint>.", {
         checksSha256: expected,
         checks: config.checks,
@@ -1068,14 +1072,25 @@ function commandEvaluate(workspace, config, args) {
         checkTimeoutMs: config.checkTimeoutMs || 180000,
       });
     }
-    checkApproval = {
-      sha256: expected,
-      checks: config.checks,
-      checkEnvAllowlist: config.checkEnvAllowlist || [],
-      approvedAt: now(),
-    };
+    if (args["checks-sha256"] === expected) {
+      checkApproval = {
+        sha256: expected,
+        checks: config.checks,
+        checkEnvAllowlist: config.checkEnvAllowlist || [],
+        approvedAt: now(),
+      };
+      approval = "approved";
+    } else {
+      checkApproval = { ...previousApproval, reusedAt: now() };
+      approval = "reused";
+    }
   }
-  const evaluationDir = descendant(runDir, "evaluation directory", "evaluation", `iteration-${state.iteration}-attempt-${state.implementationAttempt}`);
+  const previousEvaluationAttempt = Number.isInteger(state.evaluationAttempt) && state.evaluationAttempt >= 0 ? state.evaluationAttempt : 0;
+  const evaluationAttempt = previousEvaluationAttempt + 1;
+  const evaluationName = evaluationAttempt === 1
+    ? `iteration-${state.iteration}-attempt-${state.implementationAttempt}`
+    : `iteration-${state.iteration}-attempt-${state.implementationAttempt}-evaluation-${evaluationAttempt}`;
+  const evaluationDir = descendant(runDir, "evaluation directory", "evaluation", evaluationName);
   ensureDir(evaluationDir);
   if (checkApproval) writeJson(descendant(evaluationDir, "check approval artifact", "check-approval.json"), checkApproval);
   const results = runChecks(workspace, config.checks, evaluationDir, config.checkTimeoutMs || 180000, config.checkEnvAllowlist || []);
@@ -1092,6 +1107,7 @@ function commandEvaluate(workspace, config, args) {
     selectedConcept: state.selectedConcept,
     critique: state.critique,
     implementation: state.implementation,
+    evaluationAttempt,
     checkApproval,
   }, null, 2);
   const sections = [
@@ -1136,9 +1152,10 @@ function commandEvaluate(workspace, config, args) {
   const packetFile = descendant(evaluationDir, "evaluation packet", "packet.md");
   writeText(packetFile, `${sections.join("\n")}\n`);
   state.evaluation = relative(workspace, evaluationDir);
+  state.evaluationAttempt = evaluationAttempt;
   state.checkApproval = checkApproval;
   transition(stateFile, state, "awaiting-evaluation-report", "evaluation-checks-complete", { allTechnicalChecksPassed: results.every((result) => result.passed), packet: relative(workspace, packetFile), checksSha256: checkApproval?.sha256 || null });
-  output({ action: "evaluate", runId: state.runId, state: state.status, allTechnicalChecksPassed: results.every((result) => result.passed), results, packet: relative(workspace, packetFile) });
+  output({ action: "evaluate", runId: state.runId, state: state.status, approval, evaluationAttempt, allTechnicalChecksPassed: results.every((result) => result.passed), results, packet: relative(workspace, packetFile) });
 }
 
 function validateEvaluationReport(report) {
@@ -1240,7 +1257,7 @@ function commandVerdict(workspace, config, args) {
   const { runDir, stateFile, state } = getState(workspace, config, args.run);
   requireState(state, "awaiting-verdict");
   const decision = args.decision;
-  const allowed = new Set(["pass", "iterate-implementation", "iterate-concepts", "archive"]);
+  const allowed = new Set(["pass", "retry-evaluation", "iterate-implementation", "iterate-concepts", "archive"]);
   if (!allowed.has(decision)) die("Invalid verdict decision", decision);
   const memoryAction = args["memory-action"];
   if (decision === "pass" && !new Set(["approve", "skip"]).has(memoryAction)) {
@@ -1262,7 +1279,11 @@ function commandVerdict(workspace, config, args) {
     promoted = normalizeMemoryProposal(proposal, config, state);
   }
   const verdictDir = descendant(runDir, "verdict directory", "verdict");
-  const verdictFile = descendant(verdictDir, "verdict artifact", `iteration-${state.iteration}-attempt-${state.implementationAttempt}.md`);
+  const evaluationAttempt = Number.isInteger(state.evaluationAttempt) && state.evaluationAttempt > 0 ? state.evaluationAttempt : 1;
+  const verdictName = evaluationAttempt === 1
+    ? `iteration-${state.iteration}-attempt-${state.implementationAttempt}.md`
+    : `iteration-${state.iteration}-attempt-${state.implementationAttempt}-evaluation-${evaluationAttempt}.md`;
+  const verdictFile = descendant(verdictDir, "verdict artifact", verdictName);
   writeTextNew(verdictFile, notes);
 
   let memoryRollback = null;
@@ -1287,6 +1308,19 @@ function commandVerdict(workspace, config, args) {
     const eventData = { decision, verdict: relative(workspace, verdictFile), promotedMemoryIds: promoted.map((entry) => entry.id) };
     if (decision === "pass") transition(stateFile, state, "complete", "human-verdict", eventData);
     else if (decision === "archive") transition(stateFile, state, "archived", "human-verdict", eventData);
+    else if (decision === "retry-evaluation") {
+      const previousEvaluation = {
+        evaluation: state.evaluation,
+        evaluationReport: state.evaluationReport,
+        memoryProposal: state.memoryProposal,
+      };
+      state.evaluationAttempt = evaluationAttempt;
+      state.evaluation = null;
+      state.evaluationReport = null;
+      state.memoryProposal = null;
+      state.memoryProposalSha256 = null;
+      transition(stateFile, state, "awaiting-evaluation", "human-verdict", { ...eventData, previousEvaluation });
+    }
     else if (decision === "iterate-implementation") transition(stateFile, state, "awaiting-implementation", "human-verdict", eventData);
     else {
       const previousIteration = state.iteration;
@@ -1316,7 +1350,7 @@ function commandVerdict(workspace, config, args) {
 }
 
 function printHelp() {
-  process.stdout.write(`Loop Designing harness\n\nCommands:\n  init\n  status [--run <id>]\n  start --requirement-file <path> (--ref <path-or-url> | --design-context <kind=path-or-url>) [--ref <path-or-url>] [--design-context <kind=path-or-url>] [--tag <tag>] [--allow-dirty]\n  concepts --run <id> --manifest <path>\n  critique --run <id> --decision <select|iterate> --notes-file <path> [--selection <id>]\n  implemented --run <id> --summary-file <path> --targets-manifest <path> [--evidence <path>]\n  evaluate --run <id> [--checks-sha256 <approved-fingerprint>]\n  record-evaluation --run <id> --report <path> --memory-proposal <path>\n  verdict --run <id> --decision <pass|iterate-implementation|iterate-concepts|archive> --notes-file <path> [--memory-action <approve|skip>]\n\nFor start, supply at least one repeatable --ref or --design-context source.\n`);
+  process.stdout.write(`Loop Designing harness\n\nCommands:\n  init\n  status [--run <id>]\n  start --requirement-file <path> (--ref <path-or-url> | --design-context <kind=path-or-url>) [--ref <path-or-url>] [--design-context <kind=path-or-url>] [--tag <tag>] [--allow-dirty]\n  concepts --run <id> --manifest <path>\n  critique --run <id> --decision <select|iterate> --notes-file <path> [--selection <id>]\n  implemented --run <id> --summary-file <path> --targets-manifest <path> [--evidence <path>]\n  evaluate --run <id> [--checks-sha256 <approved-fingerprint>]\n  record-evaluation --run <id> --report <path> --memory-proposal <path>\n  verdict --run <id> --decision <pass|retry-evaluation|iterate-implementation|iterate-concepts|archive> --notes-file <path> [--memory-action <approve|skip>]\n\nFor start, supply at least one repeatable --ref or --design-context source.\n`);
 }
 
 function main() {

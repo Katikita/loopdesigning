@@ -11,7 +11,7 @@ Loop Designing is a persisted state machine. The CLI owns transitions; conversat
 | `awaiting-implementation` | Implement the selected concept and critique | `awaiting-evaluation` |
 | `awaiting-evaluation` | Run configured checks and build the evaluation packet | `awaiting-evaluation-report` |
 | `awaiting-evaluation-report` | Record the model-assisted design evaluation | `awaiting-verdict` |
-| `awaiting-verdict` | Obtain a human verdict | `complete`, `archived`, `awaiting-implementation`, `awaiting-concepts` |
+| `awaiting-verdict` | Obtain a human verdict | `complete`, `archived`, `awaiting-evaluation`, `awaiting-implementation`, `awaiting-concepts` |
 
 Never skip a state. Every transition is appended to `state.json`.
 
@@ -50,6 +50,7 @@ node <skill-dir>/scripts/loop.mjs implemented --run <id> --summary-file <path> -
 node <skill-dir>/scripts/loop.mjs evaluate --run <id> [--checks-sha256 <approved-fingerprint>]
 node <skill-dir>/scripts/loop.mjs record-evaluation --run <id> --report <path> --memory-proposal <path>
 node <skill-dir>/scripts/loop.mjs verdict --run <id> --decision pass --notes-file <path> --memory-action <approve|skip>
+node <skill-dir>/scripts/loop.mjs verdict --run <id> --decision retry-evaluation --notes-file <path>
 node <skill-dir>/scripts/loop.mjs verdict --run <id> --decision iterate-implementation --notes-file <path>
 node <skill-dir>/scripts/loop.mjs verdict --run <id> --decision iterate-concepts --notes-file <path>
 node <skill-dir>/scripts/loop.mjs verdict --run <id> --decision archive --notes-file <path>
@@ -59,6 +60,7 @@ For `start`, provide at least one source; `--ref <path-or-url>` and `--design-co
 
 ## Failure routing
 
+- Retry evaluation when the implementation is unchanged but a check path/configuration is invalid, the check environment failed transiently, or the evaluation report itself needs correction. This preserves the implementation, increments the evaluation attempt, and keeps prior evaluation evidence.
 - Return to implementation when the selected concept is still correct but code, responsive behavior, states, accessibility, or visual fidelity are wrong.
 - Return to concepts when the underlying composition, emotional direction, interaction model, or chosen hypothesis is wrong.
 - Archive when the requirement is no longer valuable or the run should remain evidence without shipping.

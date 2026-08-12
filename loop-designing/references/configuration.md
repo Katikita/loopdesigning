@@ -48,7 +48,7 @@ Place `loop-designing.config.json` at the host workspace root. Run `node <skill-
 
 All configured paths, including `--config`, must be workspace-relative. The harness resolves symlinks and rejects paths that escape the workspace.
 
-Check IDs must use letters, numbers, dots, underscores, or hyphens and must be unique. Commands are string arrays executed without a shell; do not encode pipes, redirects, or shell expansion. Before execution, the harness returns a SHA-256 fingerprint over the exact commands, timeout, and environment allowlist. A human must approve that fingerprint. Checks receive a small baseline environment plus only the names in `checkEnvAllowlist`; approval still authorizes the commands to read or modify files available to the current user.
+Check IDs must use letters, numbers, dots, underscores, or hyphens and must be unique. Commands are string arrays executed without a shell; do not encode pipes, redirects, or shell expansion. Before execution, the harness returns a SHA-256 fingerprint over the exact commands, timeout, and environment allowlist. A human must approve that fingerprint. The approval may be reused within that run while the fingerprint is unchanged; any fingerprint change requires new approval. Checks receive a small baseline environment plus only the names in `checkEnvAllowlist`; approval still authorizes the commands to read or modify files available to the current user.
 
 Context files are snapshotted with hashes so a later reviewer can identify which rules informed a run. Missing context files are recorded rather than silently ignored.
 

@@ -31,6 +31,7 @@ flowchart LR
     G1 -- "iterate direction" --> C
     I --> E["Evaluation"]
     E --> G2{"Human verdict"}
+    G2 -- "retry evaluation" --> E
     G2 -- "fix implementation" --> I
     G2 -- "change direction" --> C
     G2 -- "pass" --> M["Approved memory"]
@@ -51,7 +52,7 @@ The evaluator cannot approve its own work, and proposed memory is not promoted u
 3. **Record critique.** Preserve the human's words verbatim and either select one concept or generate another set.
 4. **Implement.** Build only the selected concept and critique. External systems remain read-only unless the human explicitly authorizes them as delivery targets.
 5. **Evaluate.** Combine deterministic checks, design principles, retrieved memory, implementation evidence, and provenance into one evaluation packet.
-6. **Record a verdict.** Pass, iterate the implementation, return to concepts, or archive the run.
+6. **Record a verdict.** Pass, retry a faulty evaluation, iterate the implementation, return to concepts, or archive the run.
 7. **Promote learning.** Store reusable preferences and anti-patterns only after explicit human approval.
 
 Every transition is persisted, so a run can be inspected or resumed instead of being reconstructed from chat history.
@@ -71,7 +72,7 @@ Every transition is persisted, so a run can be inspected or resumed instead of b
 
 - The harness never chooses a concept for the human.
 - Passing automated checks never equals design approval.
-- Configured commands require fingerprint-bound human approval before execution.
+- Configured commands require fingerprint-bound human approval before execution; an unchanged fingerprint can reuse that approval within the run.
 - External publication or modification requires explicit authorization for that target.
 - Project- and tag-scoped learning is not silently broadened into global memory.
 - State mutations are locked and revision-checked.
@@ -167,7 +168,7 @@ The harness uses only Node's standard library:
 node loop-designing/scripts/test-harness.mjs
 ```
 
-The test suite covers the complete pass path, both iteration routes, archiving, command approval, environment filtering, memory scoping and rollback, image validation, provenance capture, dirty-worktree protection, concurrency locking, and symlink containment.
+The test suite covers the complete pass path, evaluation retry, both design iteration routes, archiving, command approval and fingerprint changes, environment filtering, memory scoping and rollback, image validation, provenance capture, dirty-worktree protection, concurrency locking, and symlink containment.
 
 Before publishing a local copy or opening a change, verify the installable structure and a real clean consumer installation:
 

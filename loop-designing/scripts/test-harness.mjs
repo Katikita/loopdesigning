@@ -38,6 +38,8 @@ function run(args, expectedStatus = 0) {
 }
 
 function evaluate(runId) {
+  const state = run(["status", "--run", runId]).run;
+  if (state.checkApproval) return run(["evaluate", "--run", runId]);
   const gated = run(["evaluate", "--run", runId], 1);
   assert.match(gated.error, /Configured checks can execute programs/);
   assert.match(gated.details.checksSha256, /^[a-f0-9]{64}$/);
@@ -49,6 +51,7 @@ try {
   assert.equal(help.status, 0, help.stderr);
   assert.match(help.stdout, /start --requirement-file <path> \(--ref <path-or-url> \| --design-context <kind=path-or-url>\) \[--ref <path-or-url>\] \[--design-context <kind=path-or-url>\]/);
   assert.match(help.stdout, /For start, supply at least one repeatable --ref or --design-context source\./);
+  assert.match(help.stdout, /pass\|retry-evaluation\|iterate-implementation\|iterate-concepts\|archive/);
   const onboardingInitialized = runAt(onboardingWorkspace, ["init"]);
   assert.equal(onboardingInitialized.action, "init");
   assert.deepEqual(onboardingInitialized.generatedPaths, ["loop-designing.config.json", "project-context.md"]);
@@ -388,6 +391,22 @@ fs.writeFileSync = function(file, value, options) {
   assert.equal(evaluate("LD-test-2").state, "awaiting-evaluation-report");
   const emptyMemory = write("fixtures/empty-memory.json", `${JSON.stringify({ entries: [] }, null, 2)}\n`);
   assert.equal(run(["record-evaluation", "--run", "LD-test-2", "--report", report, "--memory-proposal", emptyMemory]).state, "awaiting-verdict");
+  const beforeEvaluationRetry = run(["status", "--run", "LD-test-2"]).run;
+  const firstEvaluation = beforeEvaluationRetry.evaluation;
+  const retryEvaluationVerdict = run(["verdict", "--run", "LD-test-2", "--decision", "retry-evaluation", "--notes-file", verdict]);
+  assert.equal(retryEvaluationVerdict.state, "awaiting-evaluation");
+  const retryReady = run(["status", "--run", "LD-test-2"]).run;
+  assert.equal(retryReady.implementation, beforeEvaluationRetry.implementation);
+  assert.equal(retryReady.implementationAttempt, beforeEvaluationRetry.implementationAttempt);
+  assert.equal(retryReady.evaluationAttempt, 1);
+  const retriedEvaluation = run(["evaluate", "--run", "LD-test-2"]);
+  assert.equal(retriedEvaluation.state, "awaiting-evaluation-report");
+  assert.match(retriedEvaluation.approval, /reused/i);
+  const afterEvaluationRetry = run(["status", "--run", "LD-test-2"]).run;
+  assert.equal(afterEvaluationRetry.evaluationAttempt, 2);
+  assert.notEqual(afterEvaluationRetry.evaluation, firstEvaluation);
+  assert.equal(fs.existsSync(path.join(workspace, firstEvaluation, "report.json")), true);
+  assert.equal(run(["record-evaluation", "--run", "LD-test-2", "--report", report, "--memory-proposal", emptyMemory]).state, "awaiting-verdict");
   const iterateImplementation = run(["verdict", "--run", "LD-test-2", "--decision", "iterate-implementation", "--notes-file", verdict]);
   assert.equal(iterateImplementation.state, "awaiting-implementation");
   assert.equal(run(["implemented", "--run", "LD-test-2", "--summary-file", summary, "--targets-manifest", targets, "--evidence", evidence]).state, "awaiting-evaluation");
@@ -431,6 +450,16 @@ fs.writeFileSync = function(file, value, options) {
     findings: [{ ruleId: "technical-check", source: "loop-designing.config.json", status: "fail", severity: "high", evidence: "intentional-failure exited with status 2." }],
   }, null, 2)}\n`);
   assert.equal(run(["record-evaluation", "--run", "LD-test-3", "--report", failReport, "--memory-proposal", emptyMemory]).state, "awaiting-verdict");
+  assert.equal(run(["verdict", "--run", "LD-test-3", "--decision", "retry-evaluation", "--notes-file", verdict]).state, "awaiting-evaluation");
+  const repairedConfig = JSON.parse(fs.readFileSync(path.join(workspace, "loop-designing.config.json"), "utf8"));
+  repairedConfig.checks = [{ id: "repaired-check", command: [process.execPath, "-e", "process.exit(0)"] }];
+  fs.writeFileSync(path.join(workspace, "loop-designing.config.json"), `${JSON.stringify(repairedConfig, null, 2)}\n`);
+  const changedCheckGate = run(["evaluate", "--run", "LD-test-3"], 1);
+  assert.match(changedCheckGate.error, /Configured checks can execute programs/);
+  const repairedEvaluation = run(["evaluate", "--run", "LD-test-3", "--checks-sha256", changedCheckGate.details.checksSha256]);
+  assert.equal(repairedEvaluation.allTechnicalChecksPassed, true);
+  assert.equal(repairedEvaluation.evaluationAttempt, 2);
+  assert.equal(run(["record-evaluation", "--run", "LD-test-3", "--report", report, "--memory-proposal", emptyMemory]).state, "awaiting-verdict");
   assert.equal(run(["verdict", "--run", "LD-test-3", "--decision", "archive", "--notes-file", verdict]).state, "archived");
 
   const guardConfig = {
