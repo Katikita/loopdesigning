@@ -15,7 +15,7 @@ Loop Designing is a persisted state machine. The CLI owns transitions; conversat
 
 Never skip a state. Every transition is appended to `state.json`.
 
-On every resume, inspect the active state and read the artifacts it references before acting. When `state.implementationRevision` is non-null in `awaiting-implementation`, its verbatim contents are a mandatory additional critique, not optional context. The next `implemented` transition archives those notes in the new implementation attempt, records their path and digest in implementation provenance, exposes them to the evaluation packet, and only then clears the pending pointer. Evaluation must use the archived revision together with the original critique even though `state.implementationRevision` is null after registration.
+On every resume, inspect the active state and read the artifacts it references before acting. When `state.implementationRevision` is non-null in `awaiting-implementation`, its verbatim contents are a mandatory additional critique, not optional context. The next `implemented` transition archives those notes as `incorporated-revision.md` in the new implementation attempt, records their path and digest in implementation provenance, exposes them to the evaluation packet, and only then clears the pending pointer. Any later pre-evaluation feedback rejecting that new attempt is stored independently as its `revision-request.md`. Evaluation must use the incorporated revision together with the original critique even though `state.implementationRevision` is null after registration.
 
 ## Concept manifest
 
@@ -74,7 +74,7 @@ For `start`, provide at least one source; `--ref <path-or-url>` and `--design-co
 
 Preserve every iteration. Never overwrite earlier concept, critique, implementation, evaluation, or verdict artifacts.
 
-Pre-evaluation revision notes are historical implementation inputs. Preserve their exact bytes in the next implementation attempt and retain their path and SHA-256 digest in that attempt's provenance; evaluation packets must reproduce the archived notes verbatim.
+Pre-evaluation revision notes are historical implementation inputs. Preserve their exact bytes as the next attempt's `incorporated-revision.md` and retain its path and SHA-256 digest in that attempt's provenance; evaluation packets must reproduce those incorporated notes verbatim. Keep any new `revision-request.md` rejecting that attempt as a separate no-overwrite artifact so consecutive revision cycles retain both roles.
 
 Before recording implementation, resolve every named external system as either:
 

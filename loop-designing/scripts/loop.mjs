@@ -992,7 +992,7 @@ function commandImplemented(workspace, config, args) {
   writeJson(targetsFile, targets);
   let archivedRevision = null;
   if (pendingRevision !== null) {
-    const revisionFile = descendant(implementationDir, "archived implementation revision", "revision-request.md");
+    const revisionFile = descendant(implementationDir, "incorporated implementation revision", "incorporated-revision.md");
     writeTextNew(revisionFile, pendingRevision);
     archivedRevision = { path: relative(workspace, revisionFile), sha256: sha256(revisionFile) };
   }
@@ -1143,7 +1143,7 @@ function commandEvaluate(workspace, config, args) {
   const targetsFile = descendant(implementationDir, "targets manifest", "targets.json");
   const targets = readJson(targetsFile);
   const implementationRevision = provenance.revision
-    ? readText(resolveInside(workspace, provenance.revision.path, "archived implementation revision"))
+    ? readText(resolveInside(workspace, provenance.revision.path, "incorporated implementation revision"))
     : null;
   const stateSnapshot = JSON.stringify({
     runId: state.runId,

@@ -402,17 +402,47 @@ fs.writeFileSync = function(file, value, options) {
   const revisedImplementation = run(["implemented", "--run", "LD-test-2", "--summary-file", summary, "--targets-manifest", targets, "--evidence", evidence]);
   assert.equal(revisedImplementation.state, "awaiting-evaluation");
   const revisedImplementationDir = path.join(workspace, revisedImplementation.implementation);
-  const archivedImplementationRevision = path.join(revisedImplementationDir, "revision-request.md");
-  assert.equal(fs.readFileSync(archivedImplementationRevision, "utf8"), implementationRevisionText);
   const revisedProvenance = JSON.parse(fs.readFileSync(path.join(revisedImplementationDir, "provenance.json"), "utf8"));
+  const archivedImplementationRevision = path.join(workspace, revisedProvenance.revision.path);
+  assert.equal(fs.readFileSync(archivedImplementationRevision, "utf8"), implementationRevisionText);
   assert.deepEqual(revisedProvenance.revision, {
     path: path.relative(workspace, archivedImplementationRevision).split(path.sep).join("/"),
     sha256: createHash("sha256").update(implementationRevisionText).digest("hex"),
   });
   assert.equal(run(["status", "--run", "LD-test-2"]).run.implementationRevision, null);
+
+  const secondImplementationRevisionText = "\nKeep the action below the balance.\nChange the exact label to: **Schedule transfer**.\n\n";
+  const secondImplementationRevision = write("fixtures/second-implementation-revision.md", secondImplementationRevisionText);
+  const secondPreEvaluationRevision = run(["revise-implementation", "--run", "LD-test-2", "--notes-file", secondImplementationRevision]);
+  assert.equal(secondPreEvaluationRevision.state, "awaiting-implementation");
+  assert.equal(path.basename(archivedImplementationRevision), "incorporated-revision.md");
+  assert.equal(fs.readFileSync(archivedImplementationRevision, "utf8"), implementationRevisionText);
+  const secondRevisionReady = run(["status", "--run", "LD-test-2"]).run;
+  assert.equal(secondRevisionReady.implementationAttempt, 2);
+  assert.equal(secondRevisionReady.implementationRevision, path.relative(workspace, path.join(revisedImplementationDir, "revision-request.md")).split(path.sep).join("/"));
+  assert.equal(fs.readFileSync(path.join(workspace, secondRevisionReady.implementationRevision), "utf8"), secondImplementationRevisionText);
+
+  const twiceRevisedImplementation = run(["implemented", "--run", "LD-test-2", "--summary-file", summary, "--targets-manifest", targets, "--evidence", evidence]);
+  assert.equal(twiceRevisedImplementation.state, "awaiting-evaluation");
+  const twiceRevisedImplementationDir = path.join(workspace, twiceRevisedImplementation.implementation);
+  const twiceRevisedProvenance = JSON.parse(fs.readFileSync(path.join(twiceRevisedImplementationDir, "provenance.json"), "utf8"));
+  const secondArchivedImplementationRevision = path.join(workspace, twiceRevisedProvenance.revision.path);
+  assert.deepEqual(twiceRevisedProvenance.revision, {
+    path: path.relative(workspace, secondArchivedImplementationRevision).split(path.sep).join("/"),
+    sha256: createHash("sha256").update(secondImplementationRevisionText).digest("hex"),
+  });
+  assert.notEqual(twiceRevisedProvenance.revision.sha256, revisedProvenance.revision.sha256);
+  assert.equal(path.basename(secondArchivedImplementationRevision), "incorporated-revision.md");
+  assert.equal(fs.readFileSync(secondArchivedImplementationRevision, "utf8"), secondImplementationRevisionText);
+  assert.equal(fs.readFileSync(archivedImplementationRevision, "utf8"), implementationRevisionText);
+  assert.equal(fs.readFileSync(path.join(revisedImplementationDir, "revision-request.md"), "utf8"), secondImplementationRevisionText);
+  assert.equal(run(["status", "--run", "LD-test-2"]).run.implementationRevision, null);
+
   const revisedEvaluation = evaluate("LD-test-2");
   assert.equal(revisedEvaluation.state, "awaiting-evaluation-report");
-  assert.equal(fs.readFileSync(path.join(workspace, revisedEvaluation.packet), "utf8").includes(implementationRevisionText), true);
+  const revisedEvaluationPacket = fs.readFileSync(path.join(workspace, revisedEvaluation.packet), "utf8");
+  assert.equal(revisedEvaluationPacket.includes(secondImplementationRevisionText), true);
+  assert.equal(revisedEvaluationPacket.includes(implementationRevisionText), false);
   const emptyMemory = write("fixtures/empty-memory.json", `${JSON.stringify({ entries: [] }, null, 2)}\n`);
   assert.equal(run(["record-evaluation", "--run", "LD-test-2", "--report", report, "--memory-proposal", emptyMemory]).state, "awaiting-verdict");
   const beforeEvaluationRetry = run(["status", "--run", "LD-test-2"]).run;
