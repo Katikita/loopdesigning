@@ -18,6 +18,16 @@ const VALID_STATES = new Set([
   "complete",
   "archived",
 ]);
+const DESIGN_CONTEXT_GROUPS = {
+  tokens: "design-system",
+  typography: "design-system",
+  layout: "design-system",
+  components: "design-system",
+  "reference-screen": "reference-screens",
+  "approved-decisions": "design-rules",
+  "rejected-patterns": "design-rules",
+  accessibility: "design-rules",
+};
 
 class HarnessError extends Error {
   constructor(message, details) {
@@ -55,6 +65,48 @@ function parseArgs(argv) {
 function list(value) {
   if (value === undefined) return [];
   return Array.isArray(value) ? value : [value];
+}
+
+function designContextSummary(entries) {
+  const suppliedKinds = [...new Set(entries.map((entry) => entry.kind))];
+  const missingGroups = [...new Set(Object.values(DESIGN_CONTEXT_GROUPS))].filter((group) => !entries.some((entry) => entry.group === group));
+  return {
+    sourceCount: entries.length,
+    suppliedKinds,
+    missingGroups,
+    sparseWarning: missingGroups.length ? `Design context is sparse; missing ${missingGroups.join(", ")}.` : "",
+  };
+}
+
+function parseDesignContextArgs(args) {
+  const supplied = [
+    ...list(args.ref).map((value) => ({ kind: "reference-screen", source: value })),
+    ...list(args["design-context"]).map((value) => {
+      if (typeof value !== "string") die("Design context entries must use kind=source");
+      const separator = value.indexOf("=");
+      if (separator < 0) die("Design context entries must use kind=source", value);
+      return { kind: value.slice(0, separator).trim(), source: value.slice(separator + 1).trim() };
+    }),
+  ];
+  if (!supplied.length) die("Provide at least one --ref or --design-context source");
+
+  const seen = new Set();
+  const entries = supplied.map(({ kind, source }) => {
+    if (!kind) die("Design context kind is required");
+    if (!Object.hasOwn(DESIGN_CONTEXT_GROUPS, kind)) die("Unknown design context kind", kind);
+    if (typeof source !== "string" || !source.trim()) die("Design context source is required", kind);
+    const value = source.trim();
+    const duplicateKey = `${kind}\u0000${value}`;
+    if (seen.has(duplicateKey)) die("Duplicate design context kind/source", { kind, source: value });
+    seen.add(duplicateKey);
+    return {
+      kind,
+      group: DESIGN_CONTEXT_GROUPS[kind],
+      type: /^https?:\/\//i.test(value) ? "url" : "file",
+      value,
+    };
+  });
+  return { entries, summary: designContextSummary(entries) };
 }
 
 function now() {
@@ -473,7 +525,7 @@ function requireState(state, expected) {
   if (state.status !== expected) die(`Expected state ${expected}; run is ${state.status}`);
 }
 
-function copyArtifact(source, destinationDir, preferredName) {
+function copyArtifact(source, destinationDir, preferredName, expectedIdentity = null) {
   const resolved = path.resolve(source);
   if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) die("Artifact must be an existing local file", source);
   ensureDir(destinationDir);
@@ -482,8 +534,64 @@ function copyArtifact(source, destinationDir, preferredName) {
   let destination = descendant(destinationDir, "artifact destination", `${base}${ext}`);
   let counter = 2;
   while (fs.existsSync(destination)) destination = descendant(destinationDir, "artifact destination", `${base}-${counter++}${ext}`);
+  if (expectedIdentity) {
+    let descriptor;
+    try {
+      descriptor = fs.openSync(resolved, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+      const current = fs.fstatSync(descriptor);
+      if (current.dev !== expectedIdentity.dev || current.ino !== expectedIdentity.ino) {
+        die("Design context source changed after validation", source);
+      }
+      fs.writeFileSync(destination, fs.readFileSync(descriptor), { flag: "wx" });
+    } catch (error) {
+      if (error instanceof HarnessError) throw error;
+      die("Cannot copy design context source", { source, error: error.message });
+    } finally {
+      if (descriptor !== undefined) fs.closeSync(descriptor);
+    }
+    return destination;
+  }
   fs.copyFileSync(resolved, destination);
   return destination;
+}
+
+function preflightDesignContext(workspace, parsed) {
+  return {
+    ...parsed,
+    entries: parsed.entries.map((entry) => {
+      if (entry.type === "url") return entry;
+      const source = resolveInside(workspace, entry.value, "design context source");
+      if (!fs.existsSync(source)) die("Design context source must be an existing local file", entry.value);
+      const identity = fs.statSync(source);
+      if (!identity.isFile()) die("Design context source must be an existing local file", entry.value);
+      try {
+        fs.accessSync(source, fs.constants.R_OK);
+      } catch {
+        die("Design context source must be a readable local file", entry.value);
+      }
+      return { ...entry, source, copySource: fs.realpathSync(source), identity: { dev: identity.dev, ino: identity.ino } };
+    }),
+  };
+}
+
+function prepareDesignContext(workspace, runDir, designContext) {
+  const referencesDir = descendant(runDir, "references directory", "references");
+  const entries = designContext.entries.map((entry) => {
+    if (entry.type === "url") return entry;
+    const stored = copyArtifact(entry.copySource, referencesDir, entry.kind, entry.identity);
+    return {
+      kind: entry.kind,
+      group: entry.group,
+      type: entry.type,
+      source: entry.source,
+      stored: relative(workspace, stored),
+      sha256: sha256(stored),
+    };
+  });
+  const manifestFile = descendant(referencesDir, "design context manifest", "design-context.json");
+  writeJson(descendant(referencesDir, "references manifest", "manifest.json"), { references: entries });
+  writeJson(manifestFile, { entries, summary: designContext.summary });
+  return { manifest: relative(workspace, manifestFile), entries, summary: designContext.summary };
 }
 
 function relative(workspace, file) {
@@ -501,7 +609,9 @@ function retrieveMemory(entries, config, tags) {
   });
 }
 
-function snapshotContext(workspace, config, runDir, requirement, refs, tags, approved, rejected) {
+function snapshotContext(workspace, config, runDir, requirement, designContext, tags, approved, rejected) {
+  const labelEntry = (entry) => `- ${entry.type === "file" ? entry.stored : entry.value}`;
+  const entriesFor = (group) => designContext.entries.filter((entry) => entry.group === group);
   const sections = [
     "# Loop Designing context snapshot",
     "",
@@ -513,17 +623,19 @@ function snapshotContext(workspace, config, runDir, requirement, refs, tags, app
     "",
     requirement.trim(),
     "",
-    "## References",
+    "## Design context",
     "",
-    ...(refs.length ? refs.map((ref) => `- ${ref.type === "file" ? ref.stored : ref.value}`) : ["- None supplied"]),
+    "### Design system",
     "",
-    "## Retrieved approved memory",
+    ...(entriesFor("design-system").length ? entriesFor("design-system").map(labelEntry) : ["- None supplied"]),
     "",
-    ...(approved.length ? approved.map((entry) => `- [${entry.id || "unversioned"}] ${entry.statement} — ${entry.rationale}`) : ["- None"]),
+    "### Reference screens",
     "",
-    "## Retrieved rejected memory",
+    ...(entriesFor("reference-screens").length ? entriesFor("reference-screens").map(labelEntry) : ["- None supplied"]),
     "",
-    ...(rejected.length ? rejected.map((entry) => `- [${entry.id || "unversioned"}] ${entry.statement} — ${entry.rationale}`) : ["- None"]),
+    "### Design rules",
+    "",
+    ...(entriesFor("design-rules").length ? entriesFor("design-rules").map(labelEntry) : ["- None supplied"]),
   ];
 
   const sources = [];
@@ -539,9 +651,20 @@ function snapshotContext(workspace, config, runDir, requirement, refs, tags, app
     sections.push("", `## Source: ${source}`, "", content.trim());
   }
 
+  sections.push(
+    "",
+    "## Retrieved approved memory",
+    "",
+    ...(approved.length ? approved.map((entry) => `- [${entry.id || "unversioned"}] ${entry.statement} — ${entry.rationale}`) : ["- None"]),
+    "",
+    "## Retrieved rejected memory",
+    "",
+    ...(rejected.length ? rejected.map((entry) => `- [${entry.id || "unversioned"}] ${entry.statement} — ${entry.rationale}`) : ["- None"]),
+  );
+
   const contextDir = descendant(runDir, "context directory", "context");
   writeText(descendant(contextDir, "context snapshot", "context.md"), `${sections.join("\n")}\n`);
-  writeJson(descendant(contextDir, "context manifest", "manifest.json"), { sources, approvedMemory: approved, rejectedMemory: rejected });
+  writeJson(descendant(contextDir, "context manifest", "manifest.json"), { sources, designContext, approvedMemory: approved, rejectedMemory: rejected });
 }
 
 function gitSnapshot(workspace) {
@@ -582,6 +705,8 @@ function commandInit(workspace, args) {
 }
 
 function commandStart(workspace, config, args) {
+  const parsedDesignContext = parseDesignContextArgs(args);
+  const designContext = preflightDesignContext(workspace, parsedDesignContext);
   const resolved = pathsFor(workspace, config);
   ensureDir(resolved.runsDir);
   const active = listRuns(resolved.runsDir).find((run) => !TERMINAL_STATES.has(run.status));
@@ -601,23 +726,20 @@ function commandStart(workspace, config, args) {
   if (fs.existsSync(runDir)) die(`Run ${runId} already exists`);
   for (const dir of ["references", "concepts", "critique", "implementation", "evaluation", "verdict", "context"]) ensureDir(descendant(runDir, `${dir} directory`, dir));
   const requirementPath = descendant(runDir, "requirement artifact", "requirement.md");
-  writeText(requirementPath, `${String(requirement).trim()}\n`);
-
-  const refs = [];
-  for (const ref of list(args.ref).map(String)) {
-    if (/^https?:\/\//i.test(ref)) refs.push({ type: "url", value: ref });
-    else {
-      const stored = copyArtifact(ref, descendant(runDir, "references directory", "references"));
-      refs.push({ type: "file", source: path.resolve(ref), stored: relative(workspace, stored), sha256: sha256(stored) });
-    }
+  let preparedDesignContext;
+  try {
+    writeText(requirementPath, `${String(requirement).trim()}\n`);
+    preparedDesignContext = prepareDesignContext(workspace, runDir, designContext);
+  } catch (error) {
+    fs.rmSync(runDir, { recursive: true, force: true });
+    throw error;
   }
-  writeJson(descendant(runDir, "references manifest", "references", "manifest.json"), { references: refs });
 
   appendJsonl(resolved.approved, []);
   appendJsonl(resolved.rejected, []);
   const approved = retrieveMemory(readJsonl(resolved.approved), config, tags);
   const rejected = retrieveMemory(readJsonl(resolved.rejected), config, tags);
-  snapshotContext(workspace, config, runDir, String(requirement), refs, tags, approved, rejected);
+  snapshotContext(workspace, config, runDir, String(requirement), preparedDesignContext, tags, approved, rejected);
 
   const createdAt = now();
   const state = {
@@ -632,13 +754,14 @@ function commandStart(workspace, config, args) {
     updatedAt: createdAt,
     tags,
     requirement: relative(workspace, requirementPath),
-    references: refs,
+    references: preparedDesignContext.entries,
+    designContext: preparedDesignContext,
     baseline,
     selectedConcept: null,
     transitions: [{ from: null, to: "awaiting-concepts", event: "start", at: createdAt }],
   };
   writeJson(descendant(runDir, "run state", "state.json"), state);
-  output({ action: "start", runId, state: state.status, runDir: relative(workspace, runDir), context: relative(workspace, descendant(runDir, "context snapshot", "context", "context.md")) });
+  output({ action: "start", runId, state: state.status, runDir: relative(workspace, runDir), context: relative(workspace, descendant(runDir, "context snapshot", "context", "context.md")), designContextSummary: preparedDesignContext.summary });
 }
 
 function commandStatus(workspace, config, args) {
@@ -1153,7 +1276,7 @@ function commandVerdict(workspace, config, args) {
 }
 
 function printHelp() {
-  process.stdout.write(`Loop Designing harness\n\nCommands:\n  init\n  status [--run <id>]\n  start --requirement-file <path> [--ref <path-or-url>] [--tag <tag>] [--allow-dirty]\n  concepts --run <id> --manifest <path>\n  critique --run <id> --decision <select|iterate> --notes-file <path> [--selection <id>]\n  implemented --run <id> --summary-file <path> --targets-manifest <path> [--evidence <path>]\n  evaluate --run <id> [--checks-sha256 <approved-fingerprint>]\n  record-evaluation --run <id> --report <path> --memory-proposal <path>\n  verdict --run <id> --decision <pass|iterate-implementation|iterate-concepts|archive> --notes-file <path> [--memory-action <approve|skip>]\n`);
+  process.stdout.write(`Loop Designing harness\n\nCommands:\n  init\n  status [--run <id>]\n  start --requirement-file <path> [--ref <path-or-url>] [--design-context <kind=path-or-url>] [--tag <tag>] [--allow-dirty]\n  concepts --run <id> --manifest <path>\n  critique --run <id> --decision <select|iterate> --notes-file <path> [--selection <id>]\n  implemented --run <id> --summary-file <path> --targets-manifest <path> [--evidence <path>]\n  evaluate --run <id> [--checks-sha256 <approved-fingerprint>]\n  record-evaluation --run <id> --report <path> --memory-proposal <path>\n  verdict --run <id> --decision <pass|iterate-implementation|iterate-concepts|archive> --notes-file <path> [--memory-action <approve|skip>]\n`);
 }
 
 function main() {
@@ -1188,6 +1311,7 @@ function main() {
     commands[command](workspace, config, args);
     return;
   }
+  if (command === "start") preflightDesignContext(workspace, parseDesignContextArgs(args));
   const { runsDir } = pathsFor(workspace, config);
   ensureDir(runsDir);
   withFileLock(descendant(runsDir, "transition lock", ".harness.lock"), () => commands[command](workspace, config, args));

@@ -14,6 +14,7 @@ const guardWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-gua
 const invalidWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-invalid-test-"));
 const symlinkWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-symlink-test-"));
 const symlinkOutside = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-outside-test-"));
+const onboardingWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-onboarding-test-"));
 
 function write(relativePath, value) {
   const file = path.join(workspace, relativePath);
@@ -41,6 +42,83 @@ function evaluate(runId) {
 }
 
 try {
+  const onboardingInitialized = runAt(onboardingWorkspace, ["init"]);
+  assert.equal(onboardingInitialized.action, "init");
+  const onboardingConfig = JSON.parse(fs.readFileSync(path.join(onboardingWorkspace, "loop-designing.config.json"), "utf8"));
+  onboardingConfig.runsDir = "runs";
+  onboardingConfig.requireCleanWorktree = false;
+  fs.writeFileSync(path.join(onboardingWorkspace, "loop-designing.config.json"), `${JSON.stringify(onboardingConfig, null, 2)}\n`);
+  const onboardingRequirement = path.join(onboardingWorkspace, "requirement.md");
+  fs.writeFileSync(onboardingRequirement, "Require design context before starting.\n");
+  const noContext = runAt(onboardingWorkspace, ["start", "--id", "LD-no-context", "--requirement-file", onboardingRequirement], 1);
+  assert.match(noContext.error, /Provide at least one --ref or --design-context source/);
+  assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-no-context")), false);
+  fs.mkdirSync(path.join(onboardingWorkspace, "fixtures"), { recursive: true });
+  for (const kind of ["reference-screen", "tokens", "typography", "components", "approved-decisions", "rejected-patterns", "accessibility"]) {
+    fs.writeFileSync(path.join(onboardingWorkspace, "fixtures", `${kind}.md`), `${kind} fixture\n`);
+  }
+  fs.symlinkSync(path.join(onboardingWorkspace, "fixtures", "tokens.md"), path.join(onboardingWorkspace, "fixtures", "tokens-link.md"));
+  const everyKind = runAt(onboardingWorkspace, [
+    "start", "--id", "LD-every-kind", "--requirement-file", onboardingRequirement,
+    "--ref", "fixtures/reference-screen.md",
+    "--design-context", "tokens=fixtures/tokens-link.md",
+    "--design-context", "typography=fixtures/typography.md",
+    "--design-context", "layout=https://example.test/layout",
+    "--design-context", "components=fixtures/components.md",
+    "--design-context", "approved-decisions=fixtures/approved-decisions.md",
+    "--design-context", "rejected-patterns=fixtures/rejected-patterns.md",
+    "--design-context", "accessibility=fixtures/accessibility.md",
+  ]);
+  assert.equal(everyKind.designContextSummary.sourceCount, 8);
+  assert.deepEqual(everyKind.designContextSummary.suppliedKinds, ["reference-screen", "tokens", "typography", "layout", "components", "approved-decisions", "rejected-patterns", "accessibility"]);
+  assert.deepEqual(everyKind.designContextSummary.missingGroups, []);
+  assert.equal(everyKind.designContextSummary.sparseWarning, "");
+  const everyKindState = JSON.parse(fs.readFileSync(path.join(onboardingWorkspace, "runs", "LD-every-kind", "state.json"), "utf8"));
+  assert.equal(everyKindState.designContext.entries.length, 8);
+  assert.match(everyKindState.designContext.manifest, /references\/design-context\.json$/);
+  const everyKindManifest = JSON.parse(fs.readFileSync(path.join(onboardingWorkspace, everyKindState.designContext.manifest), "utf8"));
+  assert.equal(everyKindManifest.entries.find((entry) => entry.kind === "tokens").type, "file");
+  assert.equal(everyKindManifest.entries.find((entry) => entry.kind === "layout").value, "https://example.test/layout");
+  assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-every-kind", "references", "manifest.json")), true);
+  const everyKindContext = JSON.parse(fs.readFileSync(path.join(onboardingWorkspace, "runs", "LD-every-kind", "context", "manifest.json"), "utf8"));
+  assert.equal(everyKindContext.designContext.summary.sourceCount, 8);
+  const everyKindSnapshot = fs.readFileSync(path.join(onboardingWorkspace, "runs", "LD-every-kind", "context", "context.md"), "utf8");
+  assert.match(everyKindSnapshot, /## Design context\n\n### Design system[\s\S]*### Reference screens[\s\S]*### Design rules/);
+  assert.ok(everyKindSnapshot.indexOf("## Design context") < everyKindSnapshot.indexOf("## Retrieved approved memory"));
+  const malformedContext = runAt(onboardingWorkspace, ["start", "--id", "LD-malformed-context", "--requirement-file", onboardingRequirement, "--design-context", "tokens"], 1);
+  assert.match(malformedContext.error, /Design context entries must use kind=source/);
+  assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-malformed-context")), false);
+  const missingKind = runAt(onboardingWorkspace, ["start", "--id", "LD-missing-kind", "--requirement-file", onboardingRequirement, "--design-context", "=fixtures/tokens.md"], 1);
+  assert.match(missingKind.error, /Design context kind is required/);
+  assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-missing-kind")), false);
+  const unknownKind = runAt(onboardingWorkspace, ["start", "--id", "LD-unknown-kind", "--requirement-file", onboardingRequirement, "--design-context", "unknown=fixtures/tokens.md"], 1);
+  assert.match(unknownKind.error, /Unknown design context kind/);
+  assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-unknown-kind")), false);
+  const emptySource = runAt(onboardingWorkspace, ["start", "--id", "LD-empty-source", "--requirement-file", onboardingRequirement, "--design-context", "tokens="], 1);
+  assert.match(emptySource.error, /Design context source is required/);
+  assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-empty-source")), false);
+  const duplicateSource = runAt(onboardingWorkspace, ["start", "--id", "LD-duplicate-source", "--requirement-file", onboardingRequirement, "--ref", "fixtures/reference-screen.md", "--ref", "fixtures/reference-screen.md"], 1);
+  assert.match(duplicateSource.error, /Duplicate design context kind\/source/);
+  assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-duplicate-source")), false);
+  const missingLocal = runAt(onboardingWorkspace, ["start", "--id", "LD-missing-local", "--requirement-file", onboardingRequirement, "--ref", "fixtures/missing.md"], 1);
+  assert.match(missingLocal.error, /Design context source must be an existing local file/);
+  assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-missing-local")), false);
+  const unreadableSource = path.join(onboardingWorkspace, "fixtures", "unreadable.md");
+  fs.writeFileSync(unreadableSource, "Unreadable reference.\n");
+  fs.chmodSync(unreadableSource, 0o000);
+  const unreadableLocal = runAt(onboardingWorkspace, ["start", "--id", "LD-unreadable-local", "--requirement-file", onboardingRequirement, "--ref", "fixtures/unreadable.md", "--force-new"], 1);
+  fs.chmodSync(unreadableSource, 0o644);
+  assert.match(unreadableLocal.error, /Design context source must be a readable local file/);
+  assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-unreadable-local")), false);
+  const parentEscape = runAt(onboardingWorkspace, ["start", "--id", "LD-parent-escape", "--requirement-file", onboardingRequirement, "--ref", "../escape.md"], 1);
+  assert.match(parentEscape.error, /design context source must stay inside the workspace/);
+  assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-parent-escape")), false);
+  fs.writeFileSync(path.join(symlinkOutside, "reference.md"), "Outside reference.\n");
+  fs.symlinkSync(symlinkOutside, path.join(onboardingWorkspace, "fixtures", "outside-link"));
+  const symlinkEscape = runAt(onboardingWorkspace, ["start", "--id", "LD-symlink-escape", "--requirement-file", onboardingRequirement, "--ref", "fixtures/outside-link/reference.md"], 1);
+  assert.match(symlinkEscape.error, /design context source escapes the workspace through a symlink/);
+  assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-symlink-escape")), false);
+
   const initialized = run(["init"]);
   assert.equal(initialized.action, "init");
   assert.equal(fs.existsSync(path.join(workspace, "loop-designing.config.json")), true);
@@ -75,11 +153,18 @@ try {
     checkEnvAllowlist: ["LOOP_ALLOWED"],
   }, null, 2)}\n`);
   const requirement = write("fixtures/requirement.md", "Design a calmer account overview.\n");
+  write("fixtures/reference-screen.png", Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"));
+  const referenceScreen = "fixtures/reference-screen.png";
   assert.equal(spawnSync("git", ["init"], { cwd: workspace }).status, 0);
   assert.equal(spawnSync("git", ["add", "."], { cwd: workspace }).status, 0);
   assert.equal(spawnSync("git", ["-c", "user.name=Loop Test", "-c", "user.email=loop@example.test", "commit", "-m", "baseline"], { cwd: workspace }).status, 0);
-  const started = run(["start", "--id", "LD-test-1", "--requirement-file", requirement, "--tag", "account"]);
+  const started = run(["start", "--id", "LD-test-1", "--requirement-file", requirement, "--tag", "account", "--ref", referenceScreen]);
   assert.equal(started.state, "awaiting-concepts");
+  assert.equal(started.designContextSummary.sourceCount, 1);
+  assert.deepEqual(started.designContextSummary.suppliedKinds, ["reference-screen"]);
+  assert.deepEqual(started.designContextSummary.missingGroups, ["design-system", "design-rules"]);
+  assert.equal(typeof started.designContextSummary.sparseWarning, "string");
+  assert.notEqual(started.designContextSummary.sparseWarning.length, 0);
   assert.doesNotMatch(fs.readFileSync(path.join(workspace, started.context), "utf8"), /LEGACY ENTRY MUST NOT BE RETRIEVED/);
 
   const earlySummary = write("fixtures/too-early.md", "Not allowed yet.\n");
@@ -200,7 +285,7 @@ try {
   assert.equal(fs.readFileSync(path.join(workspace, "runs/LD-test-1/verdict/iteration-1-attempt-1.md"), "utf8"), verdictText);
 
   const requirementTwo = write("fixtures/requirement-2.md", "Refine the account action hierarchy.\n");
-  const second = run(["start", "--id", "LD-test-2", "--requirement-file", requirementTwo, "--tag", "account"]);
+  const second = run(["start", "--id", "LD-test-2", "--requirement-file", requirementTwo, "--tag", "account", "--ref", referenceScreen]);
   const context = fs.readFileSync(path.join(workspace, second.context), "utf8");
   assert.match(context, /Use one dominant focal action on account surfaces/);
   assert.equal(run(["concepts", "--run", "LD-test-2", "--manifest", conceptManifest]).state, "awaiting-critique");
@@ -223,7 +308,7 @@ try {
   assert.equal(run(["record-evaluation", "--run", "LD-test-2", "--report", report, "--memory-proposal", emptyMemory]).state, "awaiting-verdict");
   assert.equal(run(["verdict", "--run", "LD-test-2", "--decision", "archive", "--notes-file", verdict]).state, "archived");
 
-  const third = run(["start", "--id", "LD-test-3", "--requirement-file", requirementTwo, "--tag", "account"]);
+  const third = run(["start", "--id", "LD-test-3", "--requirement-file", requirementTwo, "--tag", "account", "--ref", referenceScreen]);
   assert.equal(third.state, "awaiting-concepts");
   assert.equal(run(["concepts", "--run", "LD-test-3", "--manifest", conceptManifest]).state, "awaiting-critique");
   assert.equal(run(["critique", "--run", "LD-test-3", "--decision", "iterate", "--notes-file", critique]).state, "awaiting-concepts");
@@ -269,14 +354,15 @@ try {
   fs.writeFileSync(path.join(guardWorkspace, "loop-designing.config.json"), `${JSON.stringify(guardConfig, null, 2)}\n`);
   fs.writeFileSync(path.join(guardWorkspace, "principles.md"), "Prefer clear hierarchy.\n");
   fs.writeFileSync(path.join(guardWorkspace, "requirement.md"), "Test the dirty-worktree guard.\n");
+  fs.writeFileSync(path.join(guardWorkspace, "reference-screen.md"), "Guard reference screen.\n");
   assert.equal(spawnSync("git", ["init"], { cwd: guardWorkspace }).status, 0);
   assert.equal(spawnSync("git", ["add", "."], { cwd: guardWorkspace }).status, 0);
   assert.equal(spawnSync("git", ["-c", "user.name=Loop Test", "-c", "user.email=loop@example.test", "commit", "-m", "baseline"], { cwd: guardWorkspace }).status, 0);
   fs.writeFileSync(path.join(guardWorkspace, "dirty.txt"), "unrelated change\n");
-  const dirtyBlocked = runAt(guardWorkspace, ["start", "--id", "LD-guard", "--requirement-file", path.join(guardWorkspace, "requirement.md")], 1);
+  const dirtyBlocked = runAt(guardWorkspace, ["start", "--id", "LD-guard", "--requirement-file", path.join(guardWorkspace, "requirement.md"), "--ref", "reference-screen.md"], 1);
   assert.match(dirtyBlocked.error, /uncommitted changes/);
   fs.writeFileSync(path.join(guardWorkspace, "runs", ".harness.lock"), "held\n");
-  const locked = runAt(guardWorkspace, ["start", "--id", "LD-locked", "--requirement-file", path.join(guardWorkspace, "requirement.md"), "--allow-dirty"], 1);
+  const locked = runAt(guardWorkspace, ["start", "--id", "LD-locked", "--requirement-file", path.join(guardWorkspace, "requirement.md"), "--ref", "reference-screen.md", "--allow-dirty"], 1);
   assert.match(locked.error, /transition is in progress/);
   fs.unlinkSync(path.join(guardWorkspace, "runs", ".harness.lock"));
 
@@ -308,4 +394,5 @@ try {
   fs.rmSync(invalidWorkspace, { recursive: true, force: true });
   fs.rmSync(symlinkWorkspace, { recursive: true, force: true });
   fs.rmSync(symlinkOutside, { recursive: true, force: true });
+  fs.rmSync(onboardingWorkspace, { recursive: true, force: true });
 }
