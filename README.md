@@ -50,7 +50,7 @@ The evaluator cannot approve its own work, and proposed memory is not promoted u
 1. **Snapshot the requirement.** Save the requirement, references, project principles, and relevant approved or rejected memory.
 2. **Generate concepts.** Produce exactly three genuinely different bitmap concepts from the same inputs.
 3. **Record critique.** Preserve the human's words verbatim and either select one concept or generate another set.
-4. **Implement.** Build only the selected concept and critique, show its preview before evaluation, and return directly to implementation if the human rejects that evidence. External systems remain read-only unless the human explicitly authorizes them as delivery targets.
+4. **Implement.** Before coding, assess the visual medium: proceed directly for code-native interface structure, reuse an authorized existing asset where appropriate, and ask the human to choose ImageGen, an existing or provided asset, or a named simplified code-native approximation when an important visual depends on an asset. ImageGen is never used for an implementation asset without that explicit choice. Build only the selected concept and critique, render it at the concept viewport when supported, and compare the selected concept and implementation before showing a preview or registering it. Make at most two internal correction passes; if a high-impact mismatch remains, show the concept and latest render, explain the mismatch, and ask for the decision needed instead of silently iterating or registering it. External systems remain read-only unless the human explicitly authorizes them as delivery targets.
 5. **Evaluate.** Combine deterministic checks, design principles, retrieved memory, implementation evidence, and provenance into one evaluation packet.
 6. **Record a verdict.** Pass, retry a faulty evaluation, iterate the implementation, return to concepts, or archive the run.
 7. **Promote learning.** Store reusable preferences and anti-patterns only after explicit human approval.
@@ -149,7 +149,7 @@ node loop-designing/scripts/loop.mjs start \
 
 All three groups are optional, but at least one local workspace file or HTTP(S) URL is required. The harness reports any remaining groups as optional gaps and warns when only one source is supplied; it does not require every kind.
 
-On first use, the skill creates `loop-designing.config.json` and a `project-context.md` scaffold in the host workspace. Fill in the scaffold with product purpose, primary users, current experience, product and technical constraints, and success criteria when that background is available. The skill recommends these details without inventing them or blocking a valid `start` when the user declines.
+On first use, the skill creates `loop-designing.config.json` and a `project-context.md` scaffold in the host workspace. Fill in the scaffold with product purpose, primary users, the current design experience, product and technical constraints, and success criteria when that background is available. The current design experience means the interface, visual language, interaction patterns, and existing user journey. The skill recommends these details without inventing them or blocking a valid `start` when the user declines.
 
 Review the generated files to define:
 
@@ -191,7 +191,8 @@ loopdesigning/
     │   ├── configuration.md
     │   ├── evaluation-contract.md
     │   ├── memory-contract.md
-    │   └── run-contract.md
+    │   ├── run-contract.md
+    │   └── visual-fidelity-contract.md
     └── scripts/
         ├── loop.mjs
         └── test-harness.mjs

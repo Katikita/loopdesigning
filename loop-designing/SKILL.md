@@ -14,7 +14,7 @@ Require Node.js 18 or newer and access to a bitmap image-generation capability.
 1. Locate `loop-designing.config.json` in the host workspace root.
 2. If it is missing, run `node <skill-dir>/scripts/loop.mjs init` and customize the generated config and `project-context.md` scaffold. When the clean-worktree guard is enabled, ask the user to commit the generated files or explicitly authorize `--allow-dirty`; never commit automatically.
 3. Run `node <skill-dir>/scripts/loop.mjs status` before acting. Resume a non-terminal run unless the user explicitly requests a new requirement.
-4. For a new run, recommend gathering project background in `project-context.md`: product purpose, primary users, current experience, product and technical constraints, and success criteria. If it is missing or unfilled, invite the user to provide those details; never infer them from a screenshot or reference. This is recommended context, not a start gate: when the user declines, proceed with the background they supplied.
+4. For a new run, recommend gathering project background in `project-context.md`: product purpose, primary users, current design experience, product and technical constraints, and success criteria. The current design experience is the interface, visual language, interaction patterns, and existing user journey. If this background is missing or unfilled, invite the user to provide it; never infer it from a screenshot or reference. This is recommended context, not a start gate: when the user declines, proceed with the background they supplied.
 5. Inventory these optional design-context groups before saving the requirement:
    - **Design system:** `tokens`, `typography`, `layout`, `components`
    - **Reference screens:** `reference-screen`
@@ -33,6 +33,7 @@ Read these references when their stage applies:
 
 - [references/configuration.md](references/configuration.md) when initializing or changing project inputs and checks.
 - [references/run-contract.md](references/run-contract.md) when starting, resuming, registering artifacts, or routing iteration.
+- [references/visual-fidelity-contract.md](references/visual-fidelity-contract.md) after concept selection and throughout implementation QA.
 - [references/evaluation-contract.md](references/evaluation-contract.md) before evaluation.
 - [references/memory-contract.md](references/memory-contract.md) before proposing or approving memory.
 
@@ -55,13 +56,15 @@ Read these references when their stage applies:
 ### 3. Implement the selection
 
 - Implement only the selected concept and explicit critique. Treat it as an unapproved candidate until the final verdict.
+- Before writing code, use the visual-fidelity contract to assess every visually important element and complete every required human asset decision. Keep structural UI code-native when ImageGen or another asset fills a visual gap.
 - Classify every named external system as either `reference-only` or `delivery-target`.
 - When the user explicitly authorizes a delivery target, implement there and capture stable IDs, revisions, URLs, build status, and visual evidence where available.
 - If a named system's role is ambiguous, resolve it before implementation. Never infer publication permission from a reference alone.
 - Follow the host workspace's product canon, code rules, and design system.
 - Persist every named system in a targets manifest, including its role, authorization source, completion status, stable IDs, and publication evidence. Use an empty `targets` array when no external system is involved.
-- Capture a summary and evidence for every authorized target. Show the preview or visual evidence to the human before registering the implementation, and incorporate any feedback they give at that point.
-- Once the evidence is ready for evaluation, run `implemented --run <id> --summary-file <path> --targets-manifest <path> [--evidence <path>]`.
+- Capture a summary and evidence for every authorized target. Before presenting the preview or registering the implementation, render at the selected concept's viewport when supported and perform the visual-fidelity contract's side-by-side comparison against the selected concept and every recorded critique item.
+- Record the assessment, asset decisions, comparison viewport, correction-pass count, fidelity result, and remaining disclosed deviations in the implementation summary. Show the compared preview or visual evidence to the human and incorporate any feedback they give at that point.
+- Once the comparison is complete and the evidence is ready for evaluation, run `implemented --run <id> --summary-file <path> --targets-manifest <path> [--evidence <path>]`.
 - If the human rejects the preview after registration but before evaluation, preserve their words in a notes file and run `revise-implementation --run <id> --notes-file <path>`. This returns to implementation without requiring command approval or evaluating a candidate already known to be wrong.
 
 ### 4. Evaluate
@@ -89,3 +92,6 @@ Read these references when their stage applies:
 - Preserve rejected artifacts, critique, failed checks, and prior iterations.
 - Do not silently broaden tag- or project-scoped learning into global memory.
 - Do not commit, push, deploy, publish, or modify an external system unless the user explicitly authorizes that target.
+- Do not silently replace an asset-dependent visual with a code approximation.
+- Do not use ImageGen for implementation assets without the human's explicit asset choice.
+- Do not register an implementation with an unexplained high-impact concept-fidelity mismatch.
