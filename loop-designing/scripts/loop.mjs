@@ -702,7 +702,7 @@ function gitSnapshot(workspace, excludedPaths = []) {
   const inside = spawnSync("git", ["rev-parse", "--is-inside-work-tree"], { cwd: workspace, encoding: "utf8" });
   if (inside.status !== 0 || inside.stdout.trim() !== "true") return { isGit: false, head: null, dirty: false, status: "" };
   const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: workspace, encoding: "utf8" });
-  const pathspec = [".", ...excludedPaths.map((file) => `:(exclude)${relative(workspace, file)}`)];
+  const pathspec = [".", ...excludedPaths.map((file) => `:(exclude,literal)${relative(workspace, file)}`)];
   const status = spawnSync("git", ["status", "--short", "--", ...pathspec], { cwd: workspace, encoding: "utf8" });
   const statusText = status.status === 0 ? status.stdout : "";
   return {

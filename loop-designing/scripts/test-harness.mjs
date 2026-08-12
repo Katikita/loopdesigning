@@ -12,6 +12,7 @@ const cli = path.join(here, "loop.mjs");
 const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-test-"));
 const guardWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-guard-test-"));
 const cleanLockWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-clean-lock-test-"));
+const metacharacterLockWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-metacharacter-lock-test-"));
 const invalidWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-invalid-test-"));
 const symlinkWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-symlink-test-"));
 const symlinkOutside = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-outside-test-"));
@@ -458,6 +459,24 @@ fs.writeFileSync = function(file, value, options) {
   assert.equal(cleanLockState.baseline.status, "");
   assert.equal(fs.existsSync(path.join(cleanLockWorkspace, "loop designing runs", ".harness.lock")), false);
 
+  const metacharacterLockConfig = { ...guardConfig, projectId: "metacharacter-lock-test", runsDir: "runs*" };
+  fs.writeFileSync(path.join(metacharacterLockWorkspace, "loop-designing.config.json"), `${JSON.stringify(metacharacterLockConfig, null, 2)}\n`);
+  fs.writeFileSync(path.join(metacharacterLockWorkspace, "principles.md"), "Prefer clear hierarchy.\n");
+  fs.writeFileSync(path.join(metacharacterLockWorkspace, "requirement.md"), "Keep user files visible.\n");
+  fs.writeFileSync(path.join(metacharacterLockWorkspace, "reference-screen.md"), "Metacharacter workspace reference screen.\n");
+  assert.equal(spawnSync("git", ["init"], { cwd: metacharacterLockWorkspace }).status, 0);
+  assert.equal(spawnSync("git", ["add", "."], { cwd: metacharacterLockWorkspace }).status, 0);
+  assert.equal(spawnSync("git", ["-c", "user.name=Loop Test", "-c", "user.email=loop@example.test", "commit", "-m", "baseline"], { cwd: metacharacterLockWorkspace }).status, 0);
+  fs.mkdirSync(path.join(metacharacterLockWorkspace, "runsA"));
+  fs.writeFileSync(path.join(metacharacterLockWorkspace, "runsA", ".harness.lock"), "user file\n");
+  const metacharacterDirtyBlocked = runAt(metacharacterLockWorkspace, ["start", "--id", "LD-metacharacter-lock", "--requirement-file", path.join(metacharacterLockWorkspace, "requirement.md"), "--ref", "reference-screen.md"], 1);
+  assert.match(metacharacterDirtyBlocked.error, /uncommitted changes/);
+  assert.match(metacharacterDirtyBlocked.details, /runsA/);
+  const metacharacterDirtyAllowed = runAt(metacharacterLockWorkspace, ["start", "--id", "LD-metacharacter-lock", "--allow-dirty", "--requirement-file", path.join(metacharacterLockWorkspace, "requirement.md"), "--ref", "reference-screen.md"]);
+  const metacharacterLockState = JSON.parse(fs.readFileSync(path.join(metacharacterLockWorkspace, "runs*", "LD-metacharacter-lock", "state.json"), "utf8"));
+  assert.match(metacharacterLockState.baseline.status, /runsA/);
+  assert.equal(metacharacterDirtyAllowed.state, "awaiting-concepts");
+
   fs.writeFileSync(path.join(guardWorkspace, "loop-designing.config.json"), `${JSON.stringify(guardConfig, null, 2)}\n`);
   fs.writeFileSync(path.join(guardWorkspace, "principles.md"), "Prefer clear hierarchy.\n");
   fs.writeFileSync(path.join(guardWorkspace, "requirement.md"), "Test the dirty-worktree guard.\n");
@@ -499,6 +518,7 @@ fs.writeFileSync = function(file, value, options) {
   fs.rmSync(workspace, { recursive: true, force: true });
   fs.rmSync(guardWorkspace, { recursive: true, force: true });
   fs.rmSync(cleanLockWorkspace, { recursive: true, force: true });
+  fs.rmSync(metacharacterLockWorkspace, { recursive: true, force: true });
   fs.rmSync(invalidWorkspace, { recursive: true, force: true });
   fs.rmSync(symlinkWorkspace, { recursive: true, force: true });
   fs.rmSync(symlinkOutside, { recursive: true, force: true });
