@@ -56,7 +56,7 @@ Read these references when their stage applies:
 ### 3. Implement the selection
 
 - Implement only the selected concept and explicit critique. Treat it as an unapproved candidate until the final verdict.
-- Before writing code, use the visual-fidelity contract to assess every visually important element and complete every required human asset decision. Keep structural UI code-native when ImageGen or another asset fills a visual gap.
+- Before writing code, use the visual-fidelity contract to assess every visually important element and complete every required human asset decision. Keep structural UI, text, controls, state, responsive behavior, and accessibility code-native when ImageGen or another asset fills a visual gap.
 - Classify every named external system as either `reference-only` or `delivery-target`.
 - When the user explicitly authorizes a delivery target, implement there and capture stable IDs, revisions, URLs, build status, and visual evidence where available.
 - If a named system's role is ambiguous, resolve it before implementation. Never infer publication permission from a reference alone.
