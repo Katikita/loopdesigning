@@ -62,6 +62,7 @@ try {
     fs.writeFileSync(path.join(onboardingWorkspace, "fixtures", `${kind}.md`), `${kind} fixture\n`);
   }
   fs.symlinkSync(path.join(onboardingWorkspace, "fixtures", "tokens.md"), path.join(onboardingWorkspace, "fixtures", "tokens-link.md"));
+  fs.symlinkSync(path.join(onboardingWorkspace, "fixtures", "reference-screen.md"), path.join(onboardingWorkspace, "fixtures", "reference-screen-link.md"));
   const everyKind = runAt(onboardingWorkspace, [
     "start", "--id", "LD-every-kind", "--requirement-file", onboardingRequirement,
     "--ref", "fixtures/reference-screen.md",
@@ -129,19 +130,40 @@ try {
   const controlCharacterUrl = runAt(onboardingWorkspace, ["start", "--id", "LD-control-character-url", "--force-new", "--requirement-file", onboardingRequirement, "--design-context", "layout=https://example.test/x\n\n## Injected heading"], 1);
   assert.match(controlCharacterUrl.error, /control characters/);
   assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-control-character-url")), false);
+  const absoluteOutsideSource = path.join(symlinkOutside, "absolute-outside.md");
+  fs.writeFileSync(absoluteOutsideSource, "Outside absolute reference.\n");
+  const absoluteOutside = runAt(onboardingWorkspace, ["start", "--id", "LD-absolute-outside", "--force-new", "--requirement-file", onboardingRequirement, "--ref", absoluteOutsideSource], 1);
+  assert.match(absoluteOutside.error, /design context source must stay inside the workspace/);
+  assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-absolute-outside")), false);
+  const absoluteInsideSource = fs.realpathSync(path.join(onboardingWorkspace, "fixtures", "reference-screen.md"));
+  const absoluteInside = runAt(onboardingWorkspace, ["start", "--id", "LD-absolute-inside", "--force-new", "--requirement-file", onboardingRequirement, "--ref", absoluteInsideSource]);
+  assert.equal(absoluteInside.designContextSummary.sourceCount, 1);
+  assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-absolute-inside", "state.json")), true);
   const duplicateSource = runAt(onboardingWorkspace, ["start", "--id", "LD-duplicate-source", "--requirement-file", onboardingRequirement, "--ref", "fixtures/reference-screen.md", "--ref", "fixtures/reference-screen.md"], 1);
   assert.match(duplicateSource.error, /Duplicate design context kind\/source/);
   assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-duplicate-source")), false);
+  const duplicateLexicalAlias = runAt(onboardingWorkspace, ["start", "--id", "LD-duplicate-lexical-alias", "--force-new", "--requirement-file", onboardingRequirement, "--ref", "fixtures/reference-screen.md", "--ref", "./fixtures/reference-screen.md"], 1);
+  assert.match(duplicateLexicalAlias.error, /Duplicate design context kind\/source/);
+  assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-duplicate-lexical-alias")), false);
+  const duplicateSymlinkAlias = runAt(onboardingWorkspace, ["start", "--id", "LD-duplicate-symlink-alias", "--force-new", "--requirement-file", onboardingRequirement, "--ref", "fixtures/reference-screen.md", "--ref", "fixtures/reference-screen-link.md"], 1);
+  assert.match(duplicateSymlinkAlias.error, /Duplicate design context kind\/source/);
+  assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-duplicate-symlink-alias")), false);
   const missingLocal = runAt(onboardingWorkspace, ["start", "--id", "LD-missing-local", "--requirement-file", onboardingRequirement, "--ref", "fixtures/missing.md"], 1);
   assert.match(missingLocal.error, /Design context source must be an existing local file/);
   assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-missing-local")), false);
   const unreadableSource = path.join(onboardingWorkspace, "fixtures", "unreadable.md");
   fs.writeFileSync(unreadableSource, "Unreadable reference.\n");
   fs.chmodSync(unreadableSource, 0o000);
-  const unreadableLocal = runAt(onboardingWorkspace, ["start", "--id", "LD-unreadable-local", "--requirement-file", onboardingRequirement, "--ref", "fixtures/unreadable.md", "--force-new"], 1);
+  let fixtureIsUnreadable = false;
+  try { fs.accessSync(unreadableSource, fs.constants.R_OK); } catch { fixtureIsUnreadable = true; }
+  const unreadableLocal = fixtureIsUnreadable
+    ? runAt(onboardingWorkspace, ["start", "--id", "LD-unreadable-local", "--requirement-file", onboardingRequirement, "--ref", "fixtures/unreadable.md", "--force-new"], 1)
+    : null;
   fs.chmodSync(unreadableSource, 0o644);
-  assert.match(unreadableLocal.error, /Design context source must be a readable local file/);
-  assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-unreadable-local")), false);
+  if (unreadableLocal) {
+    assert.match(unreadableLocal.error, /Design context source must be a readable local file/);
+    assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-unreadable-local")), false);
+  }
   const parentEscape = runAt(onboardingWorkspace, ["start", "--id", "LD-parent-escape", "--requirement-file", onboardingRequirement, "--ref", "../escape.md"], 1);
   assert.match(parentEscape.error, /design context source must stay inside the workspace/);
   assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-parent-escape")), false);

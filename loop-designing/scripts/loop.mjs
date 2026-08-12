@@ -215,6 +215,13 @@ function resolveInside(root, relativePath, label) {
   return resolved;
 }
 
+function resolveDesignContextSource(workspace, source) {
+  const lexicalRoot = path.resolve(workspace);
+  const resolved = path.isAbsolute(source) ? path.resolve(source) : path.resolve(lexicalRoot, source);
+  if (!isInside(lexicalRoot, resolved)) die("design context source must stay inside the workspace", source);
+  return resolveInside(lexicalRoot, path.relative(lexicalRoot, resolved) || ".", "design context source");
+}
+
 function descendant(root, label, ...parts) {
   return resolveInside(root, path.join(...parts), label);
 }
@@ -567,22 +574,24 @@ function copyArtifact(source, destinationDir, preferredName, expectedIdentity = 
 }
 
 function preflightDesignContext(workspace, parsed) {
-  return {
-    ...parsed,
-    entries: parsed.entries.map((entry) => {
-      if (entry.type === "url") return entry;
-      const source = resolveInside(workspace, entry.value, "design context source");
-      if (!fs.existsSync(source)) die("Design context source must be an existing local file", entry.value);
-      const identity = fs.statSync(source);
-      if (!identity.isFile()) die("Design context source must be an existing local file", entry.value);
-      try {
-        fs.accessSync(source, fs.constants.R_OK);
-      } catch {
-        die("Design context source must be a readable local file", entry.value);
-      }
-      return { ...entry, source, copySource: fs.realpathSync(source), identity: { dev: identity.dev, ino: identity.ino } };
-    }),
-  };
+  const seenLocal = new Set();
+  const entries = parsed.entries.map((entry) => {
+    if (entry.type === "url") return entry;
+    const source = resolveDesignContextSource(workspace, entry.value);
+    if (!fs.existsSync(source)) die("Design context source must be an existing local file", entry.value);
+    const identity = fs.statSync(source);
+    if (!identity.isFile()) die("Design context source must be an existing local file", entry.value);
+    try {
+      fs.accessSync(source, fs.constants.R_OK);
+    } catch {
+      die("Design context source must be a readable local file", entry.value);
+    }
+    const duplicateKey = `${entry.kind}\u0000${identity.dev}\u0000${identity.ino}`;
+    if (seenLocal.has(duplicateKey)) die("Duplicate design context kind/source", { kind: entry.kind, source: entry.value });
+    seenLocal.add(duplicateKey);
+    return { ...entry, source, copySource: fs.realpathSync(source), identity: { dev: identity.dev, ino: identity.ino } };
+  });
+  return { ...parsed, entries };
 }
 
 function prepareDesignContext(workspace, runDir, designContext) {
