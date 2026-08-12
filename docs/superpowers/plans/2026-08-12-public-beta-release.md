@@ -97,7 +97,7 @@
 
 - [ ] **Step 1: Write the validator and consumer verifier contracts**
 
-  The validator checks folder/name agreement, `SKILL.md` frontmatter with non-empty `name` and `description`, imperative body presence, optional `agents/openai.yaml` interface fields, and required script files. The consumer verifier copies only `loop-designing/`, creates a clean host workspace, initializes it, fills `project-context.md`, starts with one local reference, then checks the state, design-context manifest, and context snapshot.
+  The validator checks folder/name agreement, `SKILL.md` frontmatter with non-empty `name` and `description`, a non-empty instruction body, optional `agents/openai.yaml` interface fields, and required script files. The consumer verifier copies only `loop-designing/`, creates a clean host workspace, initializes it, fills `project-context.md`, starts with one local reference, then checks the state, design-context manifest, and context snapshot.
 
 - [ ] **Step 2: Run both scripts against intentionally invalid fixtures**
 
@@ -180,4 +180,3 @@
 - [ ] **Step 4: Hand off without publishing**
 
   Report commits, fresh verification output, E2E evidence, and remaining limitations. Ask separately for authorization before pushing `main`, creating tag `v0.1.0`, or creating a GitHub release.
-
