@@ -19,9 +19,7 @@ Place `loop-designing.config.json` at the host workspace root. Run `node <skill-
     "rejected": "intelligence/design-memory/rejected.jsonl"
   },
   "contextFiles": [
-    "product/principles.md",
-    "STYLE_GUIDE.md",
-    "design/EVAL_RUBRIC.md"
+    "project-context.md"
   ],
   "checks": [
     {
@@ -45,7 +43,7 @@ Place `loop-designing.config.json` at the host workspace root. Run `node <skill-
 | `checkEnvAllowlist` | Extra environment variable names exposed to approved checks |
 | `memory.approved` | Workspace-relative JSONL store for preferred patterns |
 | `memory.rejected` | Workspace-relative JSONL store for avoided patterns |
-| `contextFiles` | Product principles and design rules snapshotted at run start |
+| `contextFiles` | Product background and design rules snapshotted at run start |
 | `checks` | Deterministic commands executed during evaluation |
 
 All configured paths, including `--config`, must be workspace-relative. The harness resolves symlinks and rejects paths that escape the workspace.
@@ -56,7 +54,7 @@ Context files are snapshotted with hashes so a later reviewer can identify which
 
 When a dirty start is intentional, use `--allow-dirty`. The baseline status is stored in run state and implementation provenance. The harness never resets, stashes, or deletes working-tree changes.
 
-`init` creates only `loop-designing.config.json` and reports that path. Review the file before choosing whether to commit it, ignore it, or explicitly authorize a dirty start.
+`init` creates `loop-designing.config.json` and, when absent, a `project-context.md` scaffold. The default config references that scaffold in `contextFiles`. Review both before choosing whether to commit them, ignore them, or explicitly authorize a dirty start. `init --force` rewrites the config without reading a malformed or unsupported existing config, and never overwrites an existing `project-context.md`.
 
 ## Design context at run start
 

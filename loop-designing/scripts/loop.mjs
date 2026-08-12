@@ -702,8 +702,12 @@ function gitSnapshot(workspace) {
 }
 
 function commandInit(workspace, args) {
-  const { configFile, config } = loadConfig(workspace, args, true);
+  const loaded = args.force
+    ? { configFile: resolveInside(workspace, args.config || CONFIG_NAME, "config path"), config: null }
+    : loadConfig(workspace, args, true);
+  const { configFile, config } = loaded;
   if (config && !args.force) die(`${CONFIG_NAME} already exists; use --force to replace it`);
+  const projectContextFile = resolveInside(workspace, "project-context.md", "project context path");
   const initial = {
     schemaVersion: 1,
     projectId: path.basename(workspace),
@@ -716,12 +720,17 @@ function commandInit(workspace, args) {
       approved: "loop-designing/memory/approved.jsonl",
       rejected: "loop-designing/memory/rejected.jsonl",
     },
-    contextFiles: [],
+    contextFiles: ["project-context.md"],
     checks: [],
     checkEnvAllowlist: [],
   };
   writeJson(configFile, initial);
-  output({ action: "init", config: relative(workspace, configFile), generatedPaths: [relative(workspace, configFile)] });
+  const generatedPaths = [relative(workspace, configFile)];
+  if (!fs.existsSync(projectContextFile)) {
+    writeText(projectContextFile, "# Project context\n\n## Product purpose\n\n## Primary users\n\n## Current experience\n\n## Product and technical constraints\n\n## Success criteria\n");
+    generatedPaths.push(relative(workspace, projectContextFile));
+  }
+  output({ action: "init", config: relative(workspace, configFile), generatedPaths });
 }
 
 function commandStart(workspace, config, args) {

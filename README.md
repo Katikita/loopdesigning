@@ -144,7 +144,9 @@ node loop-designing/scripts/loop.mjs start \
 
 All three groups are optional, but at least one local workspace file or HTTP(S) URL is required. The harness reports any remaining groups as optional gaps and warns when only one source is supplied; it does not require every kind.
 
-On first use, the skill creates `loop-designing.config.json` in the host workspace. Review it to define:
+On first use, the skill creates `loop-designing.config.json` and a `project-context.md` scaffold in the host workspace. Fill in the scaffold with product purpose, primary users, current experience, product and technical constraints, and success criteria when that background is available. The skill recommends these details without inventing them or blocking a valid `start` when the user declines.
+
+Review the generated files to define:
 
 - project principles and design-rule files;
 - persistent run and memory locations;
