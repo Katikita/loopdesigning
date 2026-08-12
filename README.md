@@ -122,6 +122,28 @@ References:
 - Follow the project's existing visual system.
 ```
 
+The skill starts the run with at least one concrete source. The compact CLI equivalent uses the compatible `--ref` form:
+
+```bash
+node loop-designing/scripts/loop.mjs start \
+  --requirement-file ./requirements/account-overview.md \
+  --ref ./references/account-layout.png
+```
+
+For richer onboarding, optional sources can cover the design system, reference screens, and design rules:
+
+```bash
+node loop-designing/scripts/loop.mjs start \
+  --requirement-file ./requirements/account-overview.md \
+  --design-context tokens=./design/tokens.json \
+  --design-context typography=./design/type.md \
+  --design-context reference-screen=https://example.com/account-reference \
+  --design-context approved-decisions=./design/approved-decisions.md \
+  --design-context accessibility=./design/accessibility.md
+```
+
+All three groups are optional, but at least one local workspace file or HTTP(S) URL is required. The harness reports any remaining groups as sparse context; it does not require every kind.
+
 On first use, the skill creates `loop-designing.config.json` in the host workspace. Review it to define:
 
 - project principles and design-rule files;

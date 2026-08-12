@@ -57,3 +57,39 @@ Context files are snapshotted with hashes so a later reviewer can identify which
 When a dirty start is intentional, use `--allow-dirty`. The baseline status is stored in run state and implementation provenance. The harness never resets, stashes, or deletes working-tree changes.
 
 `init` creates only `loop-designing.config.json` and reports that path. Review the file before choosing whether to commit it, ignore it, or explicitly authorize a dirty start.
+
+## Design context at run start
+
+Every new run needs at least one concrete design-context source. Inventory the three groups below, show supplied sources and optional gaps, and do not invent absent context. A single source is valid but sparse; warn about the missing groups and proceed. Supply structured inputs with repeatable `--design-context kind=source`.
+
+| Group | Supported kind | Typical source |
+|---|---|---|
+| Design system | `tokens`, `typography`, `layout`, `components` | Token file, type specification, layout guidance, component library |
+| Reference screens | `reference-screen` | Screenshot, screen file, or screen URL |
+| Design rules | `approved-decisions`, `rejected-patterns`, `accessibility` | Decision record, anti-pattern list, accessibility guidance |
+
+`--design-context` is repeatable. Each value splits on its first `=` so a URL may contain `=`. `--ref <path-or-url>` remains repeatable for compatibility and is equivalent to `--design-context reference-screen=<path-or-url>`.
+
+Local sources must be workspace-relative, stay inside the workspace after symlink resolution, exist, and be readable. The harness copies them into the run. HTTP(S) sources are retained as URL metadata and are never fetched. Reusing the same kind/source pair is rejected as a duplicate.
+
+The start result and `references/design-context.json` report `sourceCount`, `suppliedKinds`, `missingGroups`, and `sparseWarning`. Missing groups are optional; `sparseWarning` is non-empty whenever any group is absent.
+
+Minimal input:
+
+```bash
+node <skill-dir>/scripts/loop.mjs start \
+  --requirement-file <path> \
+  --design-context reference-screen=<path-or-url>
+```
+
+Richer input:
+
+```bash
+node <skill-dir>/scripts/loop.mjs start \
+  --requirement-file <path> \
+  --design-context tokens=<path> \
+  --design-context typography=<path> \
+  --design-context reference-screen=<path-or-url> \
+  --design-context approved-decisions=<path> \
+  --design-context accessibility=<path>
+```

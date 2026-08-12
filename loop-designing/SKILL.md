@@ -14,10 +14,14 @@ Require Node.js 18 or newer and access to a bitmap image-generation capability.
 1. Locate `loop-designing.config.json` in the host workspace root.
 2. If it is missing, run `node <skill-dir>/scripts/loop.mjs init` and customize the generated config. When the clean-worktree guard is enabled, ask the user to commit the config or explicitly authorize `--allow-dirty`; never commit automatically.
 3. Run `node <skill-dir>/scripts/loop.mjs status` before acting. Resume a non-terminal run unless the user explicitly requests a new requirement.
-4. For a new run, save the requirement and run:
+4. For a new run, inventory these optional context groups before saving the requirement:
+   - **Design system:** `tokens`, `typography`, `layout`, `components`
+   - **Reference screens:** `reference-screen`
+   - **Design rules:** `approved-decisions`, `rejected-patterns`, `accessibility`
+   Present the supplied items and the optional gaps. If no source is supplied, pause and ask the user for one concrete local file or HTTP(S) URL; time pressure does not waive this start requirement. Never invent missing context. Warn that one source is sparse, but proceed when the user supplies it. Run:
 
    ```bash
-   node <skill-dir>/scripts/loop.mjs start --requirement-file <path> [--ref <path-or-url>] [--tag <tag>]
+   node <skill-dir>/scripts/loop.mjs start --requirement-file <path> --design-context <kind=source> [--design-context <kind=source>] [--tag <tag>]
    ```
 
 5. Read the generated `context/context.md`. It contains the snapshotted project rules and retrieved approved and rejected memory.
