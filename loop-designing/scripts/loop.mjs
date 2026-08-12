@@ -979,6 +979,9 @@ function commandImplemented(workspace, config, args) {
   if (config.requireVisualEvidence && !inspectedEvidence.some((entry) => entry.bitmap)) {
     die("At least one valid PNG, JPG, or WebP --evidence file is required by project config");
   }
+  const pendingRevision = state.implementationRevision
+    ? readText(resolveInside(workspace, state.implementationRevision, "implementation revision request"))
+    : null;
   state.implementationAttempt += 1;
   state.evaluationAttempt = 0;
   const implementationDir = descendant(runDir, "implementation directory", "implementation", `iteration-${state.iteration}-attempt-${state.implementationAttempt}`);
@@ -987,6 +990,12 @@ function commandImplemented(workspace, config, args) {
   const targetsFile = descendant(implementationDir, "targets manifest", "targets.json");
   writeText(summaryFile, `${summary.trim()}\n`);
   writeJson(targetsFile, targets);
+  let archivedRevision = null;
+  if (pendingRevision !== null) {
+    const revisionFile = descendant(implementationDir, "archived implementation revision", "revision-request.md");
+    writeTextNew(revisionFile, pendingRevision);
+    archivedRevision = { path: relative(workspace, revisionFile), sha256: sha256(revisionFile) };
+  }
   const storedEvidence = inspectedEvidence.map(({ file, bitmap }, index) => {
     const stored = copyArtifact(file, descendant(implementationDir, "implementation evidence directory", "evidence"), `evidence-${index + 1}`);
     return { path: relative(workspace, stored), sha256: sha256(stored), bitmap };
@@ -1000,6 +1009,7 @@ function commandImplemented(workspace, config, args) {
     untrackedFiles: git.untrackedFiles,
     targets: { path: relative(workspace, targetsFile), sha256: sha256(targetsFile) },
     evidence: storedEvidence,
+    revision: archivedRevision,
     capturedAt: now(),
   });
   state.implementation = relative(workspace, implementationDir);
@@ -1132,12 +1142,16 @@ function commandEvaluate(workspace, config, args) {
   const provenance = readJson(provenanceFile);
   const targetsFile = descendant(implementationDir, "targets manifest", "targets.json");
   const targets = readJson(targetsFile);
+  const implementationRevision = provenance.revision
+    ? readText(resolveInside(workspace, provenance.revision.path, "archived implementation revision"))
+    : null;
   const stateSnapshot = JSON.stringify({
     runId: state.runId,
     iteration: state.iteration,
     selectedConcept: state.selectedConcept,
     critique: state.critique,
     implementation: state.implementation,
+    implementationRevision: provenance.revision || null,
     evaluationAttempt,
     checkApproval,
   }, null, 2);
@@ -1157,6 +1171,12 @@ function commandEvaluate(workspace, config, args) {
     "## Human critique",
     "",
     readText(resolveInside(workspace, state.critique, "critique")),
+    ...(implementationRevision === null ? [] : [
+      "",
+      "## Human implementation revision",
+      "",
+      implementationRevision,
+    ]),
     "",
     "## Implementation summary",
     "",

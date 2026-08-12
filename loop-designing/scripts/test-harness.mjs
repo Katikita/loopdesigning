@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -389,16 +390,29 @@ fs.writeFileSync = function(file, value, options) {
   assert.equal(run(["concepts", "--run", "LD-test-2", "--manifest", conceptManifest]).state, "awaiting-critique");
   assert.equal(run(["critique", "--run", "LD-test-2", "--decision", "select", "--selection", "A", "--notes-file", critique]).state, "awaiting-implementation");
   assert.equal(run(["implemented", "--run", "LD-test-2", "--summary-file", summary, "--targets-manifest", targets, "--evidence", evidence]).state, "awaiting-evaluation");
-  const preEvaluationRevision = run(["revise-implementation", "--run", "LD-test-2", "--notes-file", verdict]);
+  const implementationRevisionText = "\nMove the primary action below the balance.\nPreserve the exact label: **Transfer now**.\n\n";
+  const implementationRevision = write("fixtures/implementation-revision.md", implementationRevisionText);
+  const preEvaluationRevision = run(["revise-implementation", "--run", "LD-test-2", "--notes-file", implementationRevision]);
   assert.equal(preEvaluationRevision.state, "awaiting-implementation");
   const revisionReady = run(["status", "--run", "LD-test-2"]).run;
   assert.equal(revisionReady.implementationAttempt, 1);
   assert.equal(revisionReady.selectedConcept.id, "A");
   assert.match(revisionReady.implementationRevision, /revision-request\.md$/);
-  assert.equal(fs.readFileSync(path.join(workspace, revisionReady.implementationRevision), "utf8"), verdictText);
-  assert.equal(run(["implemented", "--run", "LD-test-2", "--summary-file", summary, "--targets-manifest", targets, "--evidence", evidence]).state, "awaiting-evaluation");
+  assert.equal(fs.readFileSync(path.join(workspace, revisionReady.implementationRevision), "utf8"), implementationRevisionText);
+  const revisedImplementation = run(["implemented", "--run", "LD-test-2", "--summary-file", summary, "--targets-manifest", targets, "--evidence", evidence]);
+  assert.equal(revisedImplementation.state, "awaiting-evaluation");
+  const revisedImplementationDir = path.join(workspace, revisedImplementation.implementation);
+  const archivedImplementationRevision = path.join(revisedImplementationDir, "revision-request.md");
+  assert.equal(fs.readFileSync(archivedImplementationRevision, "utf8"), implementationRevisionText);
+  const revisedProvenance = JSON.parse(fs.readFileSync(path.join(revisedImplementationDir, "provenance.json"), "utf8"));
+  assert.deepEqual(revisedProvenance.revision, {
+    path: path.relative(workspace, archivedImplementationRevision).split(path.sep).join("/"),
+    sha256: createHash("sha256").update(implementationRevisionText).digest("hex"),
+  });
   assert.equal(run(["status", "--run", "LD-test-2"]).run.implementationRevision, null);
-  assert.equal(evaluate("LD-test-2").state, "awaiting-evaluation-report");
+  const revisedEvaluation = evaluate("LD-test-2");
+  assert.equal(revisedEvaluation.state, "awaiting-evaluation-report");
+  assert.equal(fs.readFileSync(path.join(workspace, revisedEvaluation.packet), "utf8").includes(implementationRevisionText), true);
   const emptyMemory = write("fixtures/empty-memory.json", `${JSON.stringify({ entries: [] }, null, 2)}\n`);
   assert.equal(run(["record-evaluation", "--run", "LD-test-2", "--report", report, "--memory-proposal", emptyMemory]).state, "awaiting-verdict");
   const beforeEvaluationRetry = run(["status", "--run", "LD-test-2"]).run;

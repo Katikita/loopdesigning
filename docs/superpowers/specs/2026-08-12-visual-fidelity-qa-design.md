@@ -12,7 +12,7 @@ Rename the project-context prompt `Current experience` to `Current design experi
 
 The prompt means the interface, visual language, interaction patterns, and existing user journey—not general product history or business performance.
 
-Existing user-authored `project-context.md` files remain valid. Initialization never rewrites a preserved context file unless the user explicitly requests replacement through the existing force behavior.
+Existing user-authored `project-context.md` files remain valid. Initialization never rewrites an existing `project-context.md`; `init --force` replaces the configuration only and never overwrites the context file.
 
 ## Pre-implementation visual-medium assessment
 

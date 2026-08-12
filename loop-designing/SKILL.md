@@ -13,7 +13,7 @@ Require Node.js 18 or newer and access to a bitmap image-generation capability.
 
 1. Locate `loop-designing.config.json` in the host workspace root.
 2. If it is missing, run `node <skill-dir>/scripts/loop.mjs init` and customize the generated config and `project-context.md` scaffold. When the clean-worktree guard is enabled, ask the user to commit the generated files or explicitly authorize `--allow-dirty`; never commit automatically.
-3. Run `node <skill-dir>/scripts/loop.mjs status` before acting. Resume a non-terminal run unless the user explicitly requests a new requirement.
+3. Run `node <skill-dir>/scripts/loop.mjs status` before acting. Resume a non-terminal run unless the user explicitly requests a new requirement. Read every artifact referenced by the active state that applies to its next action. In `awaiting-implementation`, if `implementationRevision` is non-null, read that file verbatim and treat it as mandatory additional critique alongside the selected concept and original critique.
 4. For a new run, recommend gathering project background in `project-context.md`: product purpose, primary users, current design experience, product and technical constraints, and success criteria. The current design experience is the interface, visual language, interaction patterns, and existing user journey. If this background is missing or unfilled, invite the user to provide it; never infer it from a screenshot or reference. This is recommended context, not a start gate: when the user declines, proceed with the background they supplied.
 5. Inventory these optional design-context groups before saving the requirement:
    - **Design system:** `tokens`, `typography`, `layout`, `components`
@@ -55,7 +55,7 @@ Read these references when their stage applies:
 
 ### 3. Implement the selection
 
-- Implement only the selected concept and explicit critique. Treat it as an unapproved candidate until the final verdict.
+- Implement only the selected concept, explicit critique, and any pending `implementationRevision` feedback. A pending revision is mandatory additional critique: read it from run state after every resume and address it in the next implementation attempt. Treat the result as an unapproved candidate until the final verdict.
 - Before writing code, use the visual-fidelity contract to assess every visually important element and complete every required human asset decision. Keep structural UI, text, controls, state, responsive behavior, and accessibility code-native when ImageGen or another asset fills a visual gap.
 - Classify every named external system as either `reference-only` or `delivery-target`.
 - When the user explicitly authorizes a delivery target, implement there and capture stable IDs, revisions, URLs, build status, and visual evidence where available.
@@ -64,7 +64,7 @@ Read these references when their stage applies:
 - Persist every named system in a targets manifest, including its role, authorization source, completion status, stable IDs, and publication evidence. Use an empty `targets` array when no external system is involved.
 - Capture a summary and evidence for every authorized target. Before presenting the preview or registering the implementation, render at the selected concept's viewport when supported and perform the visual-fidelity contract's side-by-side comparison against the selected concept and every recorded critique item.
 - Record the assessment, asset decisions, comparison viewport, correction-pass count, fidelity result, and remaining disclosed deviations in the implementation summary. Show the compared preview or visual evidence to the human and incorporate any feedback they give at that point.
-- Once the comparison is complete and the evidence is ready for evaluation, run `implemented --run <id> --summary-file <path> --targets-manifest <path> [--evidence <path>]`.
+- Once the comparison is complete and the evidence is ready for evaluation, run `implemented --run <id> --summary-file <path> --targets-manifest <path> [--evidence <path>]`. When a pending implementation revision exists, the harness archives its verbatim notes with this new attempt before clearing the pending state pointer; later evaluation packets read the archived copy.
 - If the human rejects the preview after registration but before evaluation, preserve their words in a notes file and run `revise-implementation --run <id> --notes-file <path>`. This returns to implementation without requiring command approval or evaluating a candidate already known to be wrong.
 
 ### 4. Evaluate

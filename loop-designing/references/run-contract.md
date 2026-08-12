@@ -8,12 +8,14 @@ Loop Designing is a persisted state machine. The CLI owns transitions; conversat
 |---|---|---|
 | `awaiting-concepts` | Generate and register exactly three image concepts | `awaiting-critique` |
 | `awaiting-critique` | Obtain a human selection or iteration request | `awaiting-implementation`, `awaiting-concepts` |
-| `awaiting-implementation` | Implement the selected concept and critique | `awaiting-evaluation` |
+| `awaiting-implementation` | Implement the selected concept, original critique, and any pending implementation revision | `awaiting-evaluation` |
 | `awaiting-evaluation` | Run configured checks and build the evaluation packet, or record pre-evaluation preview feedback | `awaiting-evaluation-report`, `awaiting-implementation` |
 | `awaiting-evaluation-report` | Record the model-assisted design evaluation | `awaiting-verdict` |
 | `awaiting-verdict` | Obtain a human verdict | `complete`, `archived`, `awaiting-evaluation`, `awaiting-implementation`, `awaiting-concepts` |
 
 Never skip a state. Every transition is appended to `state.json`.
+
+On every resume, inspect the active state and read the artifacts it references before acting. When `state.implementationRevision` is non-null in `awaiting-implementation`, its verbatim contents are a mandatory additional critique, not optional context. The next `implemented` transition archives those notes in the new implementation attempt, records their path and digest in implementation provenance, exposes them to the evaluation packet, and only then clears the pending pointer. Evaluation must use the archived revision together with the original critique even though `state.implementationRevision` is null after registration.
 
 ## Concept manifest
 
@@ -62,6 +64,7 @@ For `start`, provide at least one source; `--ref <path-or-url>` and `--design-co
 ## Failure routing
 
 - Before evaluation, use `revise-implementation` when the human rejects the registered preview or visual evidence. Do not ask them to approve checks for a candidate they already know needs revision.
+- After `revise-implementation`, read the `implementationRevision` artifact from state and apply it as mandatory additional critique. Do not register another implementation based only on the selected concept and original critique.
 - Retry evaluation when the implementation is unchanged but a check path/configuration is invalid, the check environment failed transiently, or the evaluation report itself needs correction. This preserves the implementation, increments the evaluation attempt, and keeps prior evaluation evidence.
 - Return to implementation when the selected concept is still correct but code, responsive behavior, states, accessibility, or visual fidelity are wrong.
 - Return to concepts when the underlying composition, emotional direction, interaction model, or chosen hypothesis is wrong.
@@ -70,6 +73,8 @@ For `start`, provide at least one source; `--ref <path-or-url>` and `--design-co
 ## Artifact rule
 
 Preserve every iteration. Never overwrite earlier concept, critique, implementation, evaluation, or verdict artifacts.
+
+Pre-evaluation revision notes are historical implementation inputs. Preserve their exact bytes in the next implementation attempt and retain their path and SHA-256 digest in that attempt's provenance; evaluation packets must reproduce the archived notes verbatim.
 
 Before recording implementation, resolve every named external system as either:
 
