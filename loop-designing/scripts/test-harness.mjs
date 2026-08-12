@@ -58,7 +58,7 @@ try {
   assert.deepEqual(onboardingInitialized.generatedPaths, ["loop-designing.config.json", "project-context.md"]);
   const onboardingConfig = JSON.parse(fs.readFileSync(path.join(onboardingWorkspace, "loop-designing.config.json"), "utf8"));
   assert.deepEqual(onboardingConfig.contextFiles, ["project-context.md"]);
-  assert.equal(fs.readFileSync(path.join(onboardingWorkspace, "project-context.md"), "utf8"), "# Project context\n\n## Product purpose\n\n## Primary users\n\n## Current experience\n\n## Product and technical constraints\n\n## Success criteria\n");
+  assert.equal(fs.readFileSync(path.join(onboardingWorkspace, "project-context.md"), "utf8"), "# Project context\n\n## Product purpose\n\n## Primary users\n\n## Current design experience\n\n## Product and technical constraints\n\n## Success criteria\n");
   const duplicateInit = runAt(onboardingWorkspace, ["init"], 1);
   assert.match(duplicateInit.error, /already exists/);
   fs.writeFileSync(path.join(onboardingWorkspace, "project-context.md"), "Keep this product knowledge.\n");

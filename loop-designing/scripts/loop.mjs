@@ -738,7 +738,7 @@ function commandInit(workspace, args) {
   };
   writeJson(configFile, initial);
   const generatedPaths = [relative(workspace, configFile)];
-  if (writeTextIfMissing(projectContextFile, "# Project context\n\n## Product purpose\n\n## Primary users\n\n## Current experience\n\n## Product and technical constraints\n\n## Success criteria\n")) {
+  if (writeTextIfMissing(projectContextFile, "# Project context\n\n## Product purpose\n\n## Primary users\n\n## Current design experience\n\n## Product and technical constraints\n\n## Success criteria\n")) {
     generatedPaths.push(relative(workspace, projectContextFile));
   }
   output({ action: "init", config: relative(workspace, configFile), generatedPaths });
