@@ -2,6 +2,8 @@
 
 **A persistent, human-in-the-loop design harness for Codex.**
 
+**Public beta:** v0.1.0. It is a standalone skill for Node.js 18+; its CLI and schemas may evolve before a stable release. See [VERSION](VERSION) and [LICENSE](LICENSE).
+
 Loop Designing turns interface design from a one-shot generation task into a governed learning loop. It produces three visual directions, waits for human critique, implements only the selected direction, evaluates the result, and remembers only the lessons a human explicitly approves.
 
 > **Project status:** early, test-backed release. The workflow is usable, but its schemas and CLI may still evolve. This is an independent experiment and is not an official OpenAI product.
@@ -75,6 +77,8 @@ Every transition is persisted, so a run can be inspected or resumed instead of b
 - State mutations are locked and revision-checked.
 - Canonical memory promotion rolls back if the verdict transition fails.
 
+References are recorded for provenance. Local-file references are copied into the run and snapshotted; HTTP(S) references are recorded as URLs and are never fetched by the harness. Configured checks do not run until a human approves their exact fingerprint. The harness never publishes to or modifies an external system without explicit authorization for that named delivery target.
+
 ## Requirements
 
 - Node.js 18 or newer
@@ -103,7 +107,7 @@ mkdir -p .agents/skills
 cp -R /path/to/loopdesigning/loop-designing .agents/skills/loop-designing
 ```
 
-Codex supports global skills in `$HOME/.agents/skills` and repository skills in `.agents/skills`. See the [official Codex skills documentation](https://learn.chatgpt.com/docs/customization/overview#skills).
+Codex supports global skills in `$HOME/.agents/skills` and repository skills in `.agents/skills`. The installable artifact is only `loop-designing/`; root-level release tooling is intentionally not copied. See the [official Codex skills documentation](https://learn.chatgpt.com/docs/customization/overview#skills).
 
 ## Start a run
 
@@ -165,6 +169,15 @@ node loop-designing/scripts/test-harness.mjs
 
 The test suite covers the complete pass path, both iteration routes, archiving, command approval, environment filtering, memory scoping and rollback, image validation, provenance capture, dirty-worktree protection, concurrency locking, and symlink containment.
 
+Before publishing a local copy or opening a change, verify the installable structure and a real clean consumer installation:
+
+```bash
+node scripts/validate-skill.mjs loop-designing
+node scripts/verify-clean-install.mjs loop-designing
+```
+
+The clean-install verifier copies only `loop-designing/` to a temporary skills path, creates a fresh host workspace, initializes it, starts a run with a local reference, checks persisted state and snapshots, then removes its temporary files.
+
 ## Repository structure
 
 ```text
@@ -187,4 +200,4 @@ The repository root contains human-facing project documentation. The `loop-desig
 
 ## Current boundaries
 
-Loop Designing is a workflow harness, not a design model, hosted service, or replacement for human taste. It currently assumes bitmap concept generation and a filesystem-backed project workspace. Packaging it as a distributable Codex plugin is a possible future step; the skill folder remains the authoring source of truth.
+Loop Designing is a workflow harness, not a design model, hosted service, or replacement for human taste. It currently assumes bitmap concept generation and a filesystem-backed project workspace. Packaging it as a distributable Codex plugin is a possible future distribution step; until then, the standalone `loop-designing/` folder remains the authoring source of truth.

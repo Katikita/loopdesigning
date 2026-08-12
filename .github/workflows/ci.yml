@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [18.x, 22.x, 24.x]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: node --check loop-designing/scripts/loop.mjs
+      - run: node --check loop-designing/scripts/test-harness.mjs
+      - run: node --check scripts/validate-skill.mjs
+      - run: node --check scripts/verify-clean-install.mjs
+      - run: node loop-designing/scripts/test-harness.mjs
+      - run: node scripts/validate-skill.mjs loop-designing
+      - run: node scripts/verify-clean-install.mjs loop-designing
