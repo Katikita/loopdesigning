@@ -52,6 +52,7 @@ try {
   assert.match(help.stdout, /start --requirement-file <path> \(--ref <path-or-url> \| --design-context <kind=path-or-url>\) \[--ref <path-or-url>\] \[--design-context <kind=path-or-url>\]/);
   assert.match(help.stdout, /For start, supply at least one repeatable --ref or --design-context source\./);
   assert.match(help.stdout, /pass\|retry-evaluation\|iterate-implementation\|iterate-concepts\|archive/);
+  assert.match(help.stdout, /revise-implementation --run <id> --notes-file <path>/);
   const onboardingInitialized = runAt(onboardingWorkspace, ["init"]);
   assert.equal(onboardingInitialized.action, "init");
   assert.deepEqual(onboardingInitialized.generatedPaths, ["loop-designing.config.json", "project-context.md"]);
@@ -388,6 +389,15 @@ fs.writeFileSync = function(file, value, options) {
   assert.equal(run(["concepts", "--run", "LD-test-2", "--manifest", conceptManifest]).state, "awaiting-critique");
   assert.equal(run(["critique", "--run", "LD-test-2", "--decision", "select", "--selection", "A", "--notes-file", critique]).state, "awaiting-implementation");
   assert.equal(run(["implemented", "--run", "LD-test-2", "--summary-file", summary, "--targets-manifest", targets, "--evidence", evidence]).state, "awaiting-evaluation");
+  const preEvaluationRevision = run(["revise-implementation", "--run", "LD-test-2", "--notes-file", verdict]);
+  assert.equal(preEvaluationRevision.state, "awaiting-implementation");
+  const revisionReady = run(["status", "--run", "LD-test-2"]).run;
+  assert.equal(revisionReady.implementationAttempt, 1);
+  assert.equal(revisionReady.selectedConcept.id, "A");
+  assert.match(revisionReady.implementationRevision, /revision-request\.md$/);
+  assert.equal(fs.readFileSync(path.join(workspace, revisionReady.implementationRevision), "utf8"), verdictText);
+  assert.equal(run(["implemented", "--run", "LD-test-2", "--summary-file", summary, "--targets-manifest", targets, "--evidence", evidence]).state, "awaiting-evaluation");
+  assert.equal(run(["status", "--run", "LD-test-2"]).run.implementationRevision, null);
   assert.equal(evaluate("LD-test-2").state, "awaiting-evaluation-report");
   const emptyMemory = write("fixtures/empty-memory.json", `${JSON.stringify({ entries: [] }, null, 2)}\n`);
   assert.equal(run(["record-evaluation", "--run", "LD-test-2", "--report", report, "--memory-proposal", emptyMemory]).state, "awaiting-verdict");

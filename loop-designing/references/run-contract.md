@@ -9,7 +9,7 @@ Loop Designing is a persisted state machine. The CLI owns transitions; conversat
 | `awaiting-concepts` | Generate and register exactly three image concepts | `awaiting-critique` |
 | `awaiting-critique` | Obtain a human selection or iteration request | `awaiting-implementation`, `awaiting-concepts` |
 | `awaiting-implementation` | Implement the selected concept and critique | `awaiting-evaluation` |
-| `awaiting-evaluation` | Run configured checks and build the evaluation packet | `awaiting-evaluation-report` |
+| `awaiting-evaluation` | Run configured checks and build the evaluation packet, or record pre-evaluation preview feedback | `awaiting-evaluation-report`, `awaiting-implementation` |
 | `awaiting-evaluation-report` | Record the model-assisted design evaluation | `awaiting-verdict` |
 | `awaiting-verdict` | Obtain a human verdict | `complete`, `archived`, `awaiting-evaluation`, `awaiting-implementation`, `awaiting-concepts` |
 
@@ -47,6 +47,7 @@ node <skill-dir>/scripts/loop.mjs concepts --run <id> --manifest <path>
 node <skill-dir>/scripts/loop.mjs critique --run <id> --decision select --selection <id> --notes-file <path>
 node <skill-dir>/scripts/loop.mjs critique --run <id> --decision iterate --notes-file <path>
 node <skill-dir>/scripts/loop.mjs implemented --run <id> --summary-file <path> --targets-manifest <path> [--evidence <path>]
+node <skill-dir>/scripts/loop.mjs revise-implementation --run <id> --notes-file <path>
 node <skill-dir>/scripts/loop.mjs evaluate --run <id> [--checks-sha256 <approved-fingerprint>]
 node <skill-dir>/scripts/loop.mjs record-evaluation --run <id> --report <path> --memory-proposal <path>
 node <skill-dir>/scripts/loop.mjs verdict --run <id> --decision pass --notes-file <path> --memory-action <approve|skip>
@@ -60,6 +61,7 @@ For `start`, provide at least one source; `--ref <path-or-url>` and `--design-co
 
 ## Failure routing
 
+- Before evaluation, use `revise-implementation` when the human rejects the registered preview or visual evidence. Do not ask them to approve checks for a candidate they already know needs revision.
 - Retry evaluation when the implementation is unchanged but a check path/configuration is invalid, the check environment failed transiently, or the evaluation report itself needs correction. This preserves the implementation, increments the evaluation attempt, and keeps prior evaluation evidence.
 - Return to implementation when the selected concept is still correct but code, responsive behavior, states, accessibility, or visual fidelity are wrong.
 - Return to concepts when the underlying composition, emotional direction, interaction model, or chosen hypothesis is wrong.

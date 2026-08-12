@@ -1003,8 +1003,39 @@ function commandImplemented(workspace, config, args) {
     capturedAt: now(),
   });
   state.implementation = relative(workspace, implementationDir);
+  state.implementationRevision = null;
   transition(stateFile, state, "awaiting-evaluation", "implementation-recorded", { implementation: state.implementation });
   output({ action: "implemented", runId: state.runId, state: state.status, implementation: state.implementation, evidence: storedEvidence });
+}
+
+function commandReviseImplementation(workspace, config, args) {
+  const { stateFile, state } = getState(workspace, config, args.run);
+  requireState(state, "awaiting-evaluation");
+  if (!args["notes-file"]) die("Provide --notes-file with the human's pre-evaluation implementation feedback");
+  const notes = readText(path.resolve(args["notes-file"]));
+  if (!notes.trim()) die("Implementation revision notes cannot be empty");
+  if (!state.implementation) die("No implementation exists to revise");
+
+  const implementationDir = resolveInside(workspace, state.implementation, "implementation");
+  const revisionFile = descendant(implementationDir, "implementation revision request", "revision-request.md");
+  writeTextNew(revisionFile, notes);
+  try {
+    state.implementationRevision = relative(workspace, revisionFile);
+    transition(stateFile, state, "awaiting-implementation", "human-pre-evaluation-revision", {
+      implementation: state.implementation,
+      revision: state.implementationRevision,
+    });
+  } catch (error) {
+    try { fs.unlinkSync(revisionFile); } catch {}
+    throw error;
+  }
+  output({
+    action: "revise-implementation",
+    runId: state.runId,
+    state: state.status,
+    implementation: state.implementation,
+    revision: state.implementationRevision,
+  });
 }
 
 function checkApprovalFingerprint(config) {
@@ -1350,7 +1381,7 @@ function commandVerdict(workspace, config, args) {
 }
 
 function printHelp() {
-  process.stdout.write(`Loop Designing harness\n\nCommands:\n  init\n  status [--run <id>]\n  start --requirement-file <path> (--ref <path-or-url> | --design-context <kind=path-or-url>) [--ref <path-or-url>] [--design-context <kind=path-or-url>] [--tag <tag>] [--allow-dirty]\n  concepts --run <id> --manifest <path>\n  critique --run <id> --decision <select|iterate> --notes-file <path> [--selection <id>]\n  implemented --run <id> --summary-file <path> --targets-manifest <path> [--evidence <path>]\n  evaluate --run <id> [--checks-sha256 <approved-fingerprint>]\n  record-evaluation --run <id> --report <path> --memory-proposal <path>\n  verdict --run <id> --decision <pass|retry-evaluation|iterate-implementation|iterate-concepts|archive> --notes-file <path> [--memory-action <approve|skip>]\n\nFor start, supply at least one repeatable --ref or --design-context source.\n`);
+  process.stdout.write(`Loop Designing harness\n\nCommands:\n  init\n  status [--run <id>]\n  start --requirement-file <path> (--ref <path-or-url> | --design-context <kind=path-or-url>) [--ref <path-or-url>] [--design-context <kind=path-or-url>] [--tag <tag>] [--allow-dirty]\n  concepts --run <id> --manifest <path>\n  critique --run <id> --decision <select|iterate> --notes-file <path> [--selection <id>]\n  implemented --run <id> --summary-file <path> --targets-manifest <path> [--evidence <path>]\n  revise-implementation --run <id> --notes-file <path>\n  evaluate --run <id> [--checks-sha256 <approved-fingerprint>]\n  record-evaluation --run <id> --report <path> --memory-proposal <path>\n  verdict --run <id> --decision <pass|retry-evaluation|iterate-implementation|iterate-concepts|archive> --notes-file <path> [--memory-action <approve|skip>]\n\nFor start, supply at least one repeatable --ref or --design-context source.\n`);
 }
 
 function main() {
@@ -1375,6 +1406,7 @@ function main() {
     concepts: commandConcepts,
     critique: commandCritique,
     implemented: commandImplemented,
+    "revise-implementation": commandReviseImplementation,
     evaluate: commandEvaluate,
     "record-evaluation": commandRecordEvaluation,
     verdict: commandVerdict,

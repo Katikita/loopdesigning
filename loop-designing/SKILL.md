@@ -60,7 +60,9 @@ Read these references when their stage applies:
 - If a named system's role is ambiguous, resolve it before implementation. Never infer publication permission from a reference alone.
 - Follow the host workspace's product canon, code rules, and design system.
 - Persist every named system in a targets manifest, including its role, authorization source, completion status, stable IDs, and publication evidence. Use an empty `targets` array when no external system is involved.
-- Capture a summary and evidence for every authorized target, then run `implemented --run <id> --summary-file <path> --targets-manifest <path> [--evidence <path>]`.
+- Capture a summary and evidence for every authorized target. Show the preview or visual evidence to the human before registering the implementation, and incorporate any feedback they give at that point.
+- Once the evidence is ready for evaluation, run `implemented --run <id> --summary-file <path> --targets-manifest <path> [--evidence <path>]`.
+- If the human rejects the preview after registration but before evaluation, preserve their words in a notes file and run `revise-implementation --run <id> --notes-file <path>`. This returns to implementation without requiring command approval or evaluating a candidate already known to be wrong.
 
 ### 4. Evaluate
 

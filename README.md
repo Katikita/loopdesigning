@@ -50,7 +50,7 @@ The evaluator cannot approve its own work, and proposed memory is not promoted u
 1. **Snapshot the requirement.** Save the requirement, references, project principles, and relevant approved or rejected memory.
 2. **Generate concepts.** Produce exactly three genuinely different bitmap concepts from the same inputs.
 3. **Record critique.** Preserve the human's words verbatim and either select one concept or generate another set.
-4. **Implement.** Build only the selected concept and critique. External systems remain read-only unless the human explicitly authorizes them as delivery targets.
+4. **Implement.** Build only the selected concept and critique, show its preview before evaluation, and return directly to implementation if the human rejects that evidence. External systems remain read-only unless the human explicitly authorizes them as delivery targets.
 5. **Evaluate.** Combine deterministic checks, design principles, retrieved memory, implementation evidence, and provenance into one evaluation packet.
 6. **Record a verdict.** Pass, retry a faulty evaluation, iterate the implementation, return to concepts, or archive the run.
 7. **Promote learning.** Store reusable preferences and anti-patterns only after explicit human approval.
