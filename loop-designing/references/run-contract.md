@@ -42,7 +42,7 @@ Run all commands from the host workspace root:
 
 ```bash
 node <skill-dir>/scripts/loop.mjs status [--run <id>]
-node <skill-dir>/scripts/loop.mjs start --requirement-file <path> [--ref <path-or-url>] [--tag <tag>] [--allow-dirty]
+node <skill-dir>/scripts/loop.mjs start --requirement-file <path> (--ref <path-or-url> | --design-context <kind=path-or-url>) [--ref <path-or-url>] [--design-context <kind=path-or-url>] [--tag <tag>] [--allow-dirty]
 node <skill-dir>/scripts/loop.mjs concepts --run <id> --manifest <path>
 node <skill-dir>/scripts/loop.mjs critique --run <id> --decision select --selection <id> --notes-file <path>
 node <skill-dir>/scripts/loop.mjs critique --run <id> --decision iterate --notes-file <path>
@@ -54,6 +54,8 @@ node <skill-dir>/scripts/loop.mjs verdict --run <id> --decision iterate-implemen
 node <skill-dir>/scripts/loop.mjs verdict --run <id> --decision iterate-concepts --notes-file <path>
 node <skill-dir>/scripts/loop.mjs verdict --run <id> --decision archive --notes-file <path>
 ```
+
+For `start`, provide at least one source; `--ref <path-or-url>` and `--design-context <kind=path-or-url>` are both repeatable. `--ref` is compatible shorthand for `--design-context reference-screen=<path-or-url>`.
 
 ## Failure routing
 

@@ -42,6 +42,10 @@ function evaluate(runId) {
 }
 
 try {
+  const help = spawnSync(process.execPath, [cli, "help"], { encoding: "utf8" });
+  assert.equal(help.status, 0, help.stderr);
+  assert.match(help.stdout, /start --requirement-file <path> \(--ref <path-or-url> \| --design-context <kind=path-or-url>\) \[--ref <path-or-url>\] \[--design-context <kind=path-or-url>\]/);
+  assert.match(help.stdout, /For start, supply at least one repeatable --ref or --design-context source\./);
   const onboardingInitialized = runAt(onboardingWorkspace, ["init"]);
   assert.equal(onboardingInitialized.action, "init");
   const onboardingConfig = JSON.parse(fs.readFileSync(path.join(onboardingWorkspace, "loop-designing.config.json"), "utf8"));
