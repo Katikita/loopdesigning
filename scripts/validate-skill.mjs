@@ -24,12 +24,12 @@ function readFile(file, label) {
 function requireRegularFile(file, label) {
   let stat;
   try {
-    stat = fs.statSync(file);
+    stat = fs.lstatSync(file);
   } catch (error) {
     if (error.code === "ENOENT") fail(`Missing ${label}: ${path.relative(process.cwd(), file) || file}`);
     throw error;
   }
-  if (!stat.isFile()) fail(`${label} must be a regular file: ${path.relative(process.cwd(), file) || file}`);
+  if (!stat.isFile()) fail(`${label} must be a non-symlink regular file: ${path.relative(process.cwd(), file) || file}`);
 }
 
 function scalar(value, label) {
