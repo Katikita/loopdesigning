@@ -233,6 +233,12 @@ function resolveDesignContextSource(workspace, source) {
   return resolveInside(lexicalRoot, path.relative(lexicalRoot, resolved) || ".", "design context source");
 }
 
+function canonicalDestination(file) {
+  let existing = file;
+  while (!pathExists(existing)) existing = path.dirname(existing);
+  return path.resolve(fs.realpathSync(existing), path.relative(existing, file));
+}
+
 function descendant(root, label, ...parts) {
   return resolveInside(root, path.join(...parts), label);
 }
@@ -501,7 +507,23 @@ function pathsFor(workspace, config) {
   const runsDir = resolveInside(workspace, config.runsDir, "config.runsDir");
   const approved = resolveInside(workspace, config.memory.approved, "config.memory.approved");
   const rejected = resolveInside(workspace, config.memory.rejected, "config.memory.rejected");
+  if (canonicalDestination(approved) === canonicalDestination(rejected)) {
+    die("config approved and rejected memory stores must resolve to different files");
+  }
   return { runsDir, approved, rejected };
+}
+
+function preflightContextFiles(workspace, config) {
+  for (const source of config.contextFiles) {
+    const sourceFile = resolveInside(workspace, source, "context file");
+    if (!fs.existsSync(sourceFile)) continue;
+    if (!fs.statSync(sourceFile).isFile()) die("Context source must be a regular file", source);
+    try {
+      fs.accessSync(sourceFile, fs.constants.R_OK);
+    } catch {
+      die("Context source must be readable", source);
+    }
+  }
 }
 
 function listRuns(runsDir) {
@@ -764,44 +786,42 @@ function commandStart(workspace, config, args) {
   if (!/^[a-zA-Z0-9._-]+$/.test(runId)) die("Run id may contain only letters, numbers, dot, underscore, and hyphen");
   const runDir = resolveInside(resolved.runsDir, runId, "run id");
   if (fs.existsSync(runDir)) die(`Run ${runId} already exists`);
-  for (const dir of ["references", "concepts", "critique", "implementation", "evaluation", "verdict", "context"]) ensureDir(descendant(runDir, `${dir} directory`, dir));
   const requirementPath = descendant(runDir, "requirement artifact", "requirement.md");
   let preparedDesignContext;
+  let state;
   try {
+    for (const dir of ["references", "concepts", "critique", "implementation", "evaluation", "verdict", "context"]) ensureDir(descendant(runDir, `${dir} directory`, dir));
     writeText(requirementPath, `${String(requirement).trim()}\n`);
     preparedDesignContext = prepareDesignContext(workspace, runDir, designContext);
+    const approved = retrieveMemory(readJsonl(resolved.approved), config, tags);
+    const rejected = retrieveMemory(readJsonl(resolved.rejected), config, tags);
+    snapshotContext(workspace, config, runDir, String(requirement), preparedDesignContext, tags, approved, rejected);
+
+    const createdAt = now();
+    state = {
+      schemaVersion: 1,
+      revision: 0,
+      runId,
+      projectId: config.projectId,
+      status: "awaiting-concepts",
+      iteration: 1,
+      implementationAttempt: 0,
+      evaluationAttempt: 0,
+      createdAt,
+      updatedAt: createdAt,
+      tags,
+      requirement: relative(workspace, requirementPath),
+      references: preparedDesignContext.entries,
+      designContext: preparedDesignContext,
+      baseline,
+      selectedConcept: null,
+      transitions: [{ from: null, to: "awaiting-concepts", event: "start", at: createdAt }],
+    };
+    writeJson(descendant(runDir, "run state", "state.json"), state);
   } catch (error) {
     fs.rmSync(runDir, { recursive: true, force: true });
     throw error;
   }
-
-  appendJsonl(resolved.approved, []);
-  appendJsonl(resolved.rejected, []);
-  const approved = retrieveMemory(readJsonl(resolved.approved), config, tags);
-  const rejected = retrieveMemory(readJsonl(resolved.rejected), config, tags);
-  snapshotContext(workspace, config, runDir, String(requirement), preparedDesignContext, tags, approved, rejected);
-
-  const createdAt = now();
-  const state = {
-    schemaVersion: 1,
-    revision: 0,
-    runId,
-    projectId: config.projectId,
-    status: "awaiting-concepts",
-    iteration: 1,
-    implementationAttempt: 0,
-    evaluationAttempt: 0,
-    createdAt,
-    updatedAt: createdAt,
-    tags,
-    requirement: relative(workspace, requirementPath),
-    references: preparedDesignContext.entries,
-    designContext: preparedDesignContext,
-    baseline,
-    selectedConcept: null,
-    transitions: [{ from: null, to: "awaiting-concepts", event: "start", at: createdAt }],
-  };
-  writeJson(descendant(runDir, "run state", "state.json"), state);
   output({ action: "start", runId, state: state.status, runDir: relative(workspace, runDir), context: relative(workspace, descendant(runDir, "context snapshot", "context", "context.md")), designContextSummary: preparedDesignContext.summary });
 }
 
@@ -1437,7 +1457,10 @@ function main() {
     commands[command](workspace, config, args);
     return;
   }
-  if (command === "start") preflightDesignContext(workspace, parseDesignContextArgs(args));
+  if (command === "start") {
+    preflightDesignContext(workspace, parseDesignContextArgs(args));
+    preflightContextFiles(workspace, config);
+  }
   const { runsDir } = pathsFor(workspace, config);
   ensureDir(runsDir);
   withFileLock(descendant(runsDir, "transition lock", ".harness.lock"), () => commands[command](workspace, config, args));

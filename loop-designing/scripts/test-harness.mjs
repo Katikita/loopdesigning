@@ -19,6 +19,8 @@ const symlinkWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-s
 const symlinkOutside = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-outside-test-"));
 const onboardingWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-onboarding-test-"));
 const concurrentInitWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-concurrent-init-test-"));
+const memoryAliasWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-memory-alias-test-"));
+const transactionalStartWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-transactional-start-test-"));
 
 function write(relativePath, value) {
   const file = path.join(workspace, relativePath);
@@ -603,6 +605,42 @@ fs.writeFileSync = function(file, value, options) {
   const invalidCount = runAt(invalidWorkspace, ["status"], 1);
   assert.match(invalidCount.error, /conceptCount must be exactly 3/);
 
+  const memoryAliasConfig = {
+    ...guardConfig,
+    projectId: "memory-alias-test",
+    requireCleanWorktree: false,
+    contextFiles: [],
+    memory: { approved: "memory/shared.jsonl", rejected: "memory/shared.jsonl" },
+  };
+  fs.writeFileSync(path.join(memoryAliasWorkspace, "loop-designing.config.json"), `${JSON.stringify(memoryAliasConfig, null, 2)}\n`);
+  const identicalMemoryStores = runAt(memoryAliasWorkspace, ["status"], 1);
+  assert.match(identicalMemoryStores.error, /approved and rejected memory stores must resolve to different files/);
+  fs.mkdirSync(path.join(memoryAliasWorkspace, "memory"), { recursive: true });
+  fs.writeFileSync(path.join(memoryAliasWorkspace, "memory", "approved.jsonl"), "");
+  fs.symlinkSync(path.join(memoryAliasWorkspace, "memory", "approved.jsonl"), path.join(memoryAliasWorkspace, "memory", "rejected.jsonl"));
+  memoryAliasConfig.memory = { approved: "memory/approved.jsonl", rejected: "memory/rejected.jsonl" };
+  fs.writeFileSync(path.join(memoryAliasWorkspace, "loop-designing.config.json"), `${JSON.stringify(memoryAliasConfig, null, 2)}\n`);
+  const aliasedMemoryStores = runAt(memoryAliasWorkspace, ["status"], 1);
+  assert.match(aliasedMemoryStores.error, /approved and rejected memory stores must resolve to different files/);
+
+  fs.writeFileSync(path.join(symlinkOutside, "escaped-context.md"), "Escaped product canon.\n");
+  fs.symlinkSync(symlinkOutside, path.join(transactionalStartWorkspace, "context-link"));
+  fs.writeFileSync(path.join(transactionalStartWorkspace, "reference-screen.md"), "Local reference.\n");
+  fs.writeFileSync(path.join(transactionalStartWorkspace, "requirement.md"), "Do not leave a partial run.\n");
+  fs.writeFileSync(path.join(transactionalStartWorkspace, "loop-designing.config.json"), `${JSON.stringify({
+    ...guardConfig,
+    projectId: "transactional-start-test",
+    requireCleanWorktree: false,
+    contextFiles: ["context-link/escaped-context.md"],
+  }, null, 2)}\n`);
+  const escapedContextStart = runAt(transactionalStartWorkspace, [
+    "start", "--id", "LD-partial", "--requirement-file", "requirement.md", "--ref", "reference-screen.md",
+  ], 1);
+  assert.match(escapedContextStart.error, /context file escapes the workspace through a symlink/);
+  assert.equal(fs.existsSync(path.join(transactionalStartWorkspace, "runs", "LD-partial")), false);
+  assert.equal(fs.existsSync(path.join(transactionalStartWorkspace, "memory", "approved.jsonl")), false);
+  assert.equal(fs.existsSync(path.join(transactionalStartWorkspace, "memory", "rejected.jsonl")), false);
+
   process.stdout.write("Loop Designing harness test passed.\n");
 } finally {
   fs.rmSync(workspace, { recursive: true, force: true });
@@ -614,4 +652,6 @@ fs.writeFileSync = function(file, value, options) {
   fs.rmSync(symlinkOutside, { recursive: true, force: true });
   fs.rmSync(onboardingWorkspace, { recursive: true, force: true });
   fs.rmSync(concurrentInitWorkspace, { recursive: true, force: true });
+  fs.rmSync(memoryAliasWorkspace, { recursive: true, force: true });
+  fs.rmSync(transactionalStartWorkspace, { recursive: true, force: true });
 }
