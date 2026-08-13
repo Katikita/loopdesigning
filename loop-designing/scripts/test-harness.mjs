@@ -547,10 +547,12 @@ fs.writeFileSync = function(file, value, options) {
   fs.writeFileSync(path.join(metacharacterLockWorkspace, "principles.md"), "Prefer clear hierarchy.\n");
   fs.writeFileSync(path.join(metacharacterLockWorkspace, "requirement.md"), "Keep user files visible.\n");
   fs.writeFileSync(path.join(metacharacterLockWorkspace, "reference-screen.md"), "Metacharacter workspace reference screen.\n");
+  fs.mkdirSync(path.join(metacharacterLockWorkspace, "runsA"));
+  fs.writeFileSync(path.join(metacharacterLockWorkspace, "runsA", "candidate.txt"), "before\n");
   assert.equal(spawnSync("git", ["init"], { cwd: metacharacterLockWorkspace }).status, 0);
   assert.equal(spawnSync("git", ["add", "."], { cwd: metacharacterLockWorkspace }).status, 0);
   assert.equal(spawnSync("git", ["-c", "user.name=Loop Test", "-c", "user.email=loop@example.test", "commit", "-m", "baseline"], { cwd: metacharacterLockWorkspace }).status, 0);
-  fs.mkdirSync(path.join(metacharacterLockWorkspace, "runsA"));
+  fs.writeFileSync(path.join(metacharacterLockWorkspace, "runsA", "candidate.txt"), "after\n");
   fs.writeFileSync(path.join(metacharacterLockWorkspace, "runsA", ".harness.lock"), "user file\n");
   const metacharacterDirtyBlocked = runAt(metacharacterLockWorkspace, ["start", "--id", "LD-metacharacter-lock", "--requirement-file", path.join(metacharacterLockWorkspace, "requirement.md"), "--ref", "reference-screen.md"], 1);
   assert.match(metacharacterDirtyBlocked.error, /uncommitted changes/);
@@ -559,6 +561,11 @@ fs.writeFileSync = function(file, value, options) {
   const metacharacterLockState = JSON.parse(fs.readFileSync(path.join(metacharacterLockWorkspace, "runs*", "LD-metacharacter-lock", "state.json"), "utf8"));
   assert.match(metacharacterLockState.baseline.status, /runsA/);
   assert.equal(metacharacterDirtyAllowed.state, "awaiting-concepts");
+  assert.equal(runAt(metacharacterLockWorkspace, ["concepts", "--run", "LD-metacharacter-lock", "--manifest", conceptManifest]).state, "awaiting-critique");
+  assert.equal(runAt(metacharacterLockWorkspace, ["critique", "--run", "LD-metacharacter-lock", "--decision", "select", "--selection", "A", "--notes-file", critique]).state, "awaiting-implementation");
+  const metacharacterImplementation = runAt(metacharacterLockWorkspace, ["implemented", "--run", "LD-metacharacter-lock", "--summary-file", summary, "--targets-manifest", targets, "--evidence", evidence]);
+  const metacharacterDiff = fs.readFileSync(path.join(metacharacterLockWorkspace, metacharacterImplementation.implementation, "changes.diff"), "utf8");
+  assert.match(metacharacterDiff, /runsA\/candidate\.txt/);
 
   fs.writeFileSync(path.join(guardWorkspace, "loop-designing.config.json"), `${JSON.stringify(guardConfig, null, 2)}\n`);
   fs.writeFileSync(path.join(guardWorkspace, "principles.md"), "Prefer clear hierarchy.\n");

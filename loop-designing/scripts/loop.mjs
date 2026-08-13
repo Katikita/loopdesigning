@@ -903,7 +903,7 @@ function gitCapture(workspace, config, implementationDir) {
   const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: workspace, encoding: "utf8" });
   const ignoredRoots = [config.runsDir, config.memory.approved, config.memory.rejected]
     .map((entry) => path.normalize(entry).split(path.sep).join("/").replace(/^\.\//, ""));
-  const pathspec = [".", ...ignoredRoots.map((root) => `:(exclude)${root}`)];
+  const pathspec = [".", ...ignoredRoots.map((root) => `:(exclude,literal)${root}`)];
   const diffOptions = ["--binary", "--no-color"];
   let diffText = "";
   if (head.status === 0) {
