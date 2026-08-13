@@ -6,7 +6,13 @@ import path from "node:path";
 const target = process.argv[2];
 const hyphenCase = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const requiredScripts = ["scripts/loop.mjs", "scripts/test-harness.mjs"];
-const requiredReferences = ["references/visual-fidelity-contract.md"];
+const requiredReferences = [
+  "references/configuration.md",
+  "references/evaluation-contract.md",
+  "references/memory-contract.md",
+  "references/run-contract.md",
+  "references/visual-fidelity-contract.md",
+];
 const interfaceKeys = new Set(["display_name", "short_description", "default_prompt"]);
 
 function fail(message) {
@@ -31,6 +37,36 @@ function requireRegularFile(file, label) {
     throw error;
   }
   if (!stat.isFile()) fail(`${label} must be a non-symlink regular file: ${path.relative(process.cwd(), file) || file}`);
+}
+
+function requireNonemptyRegularFile(file, label) {
+  requireRegularFile(file, label);
+  if (fs.statSync(file).size === 0) fail(`${label} must be non-empty: ${path.relative(process.cwd(), file) || file}`);
+}
+
+function isInside(root, candidate) {
+  return candidate === root || candidate.startsWith(`${root}${path.sep}`);
+}
+
+function validateLocalMarkdownLinks(skillDirectory, source) {
+  const linkPattern = /!?\[[^\]]*\]\(([^)]+)\)/g;
+  for (const match of source.matchAll(linkPattern)) {
+    let destination = match[1].trim();
+    if (destination.startsWith("<") && destination.endsWith(">")) destination = destination.slice(1, -1).trim();
+    else destination = destination.split(/\s+(?=["'])/, 1)[0];
+    if (!destination || destination.startsWith("#") || /^[a-z][a-z0-9+.-]*:/i.test(destination)) continue;
+    destination = destination.split("#", 1)[0].split("?", 1)[0];
+    let decoded;
+    try {
+      decoded = decodeURIComponent(destination);
+    } catch {
+      fail(`SKILL.md contains an invalid encoded local link: ${destination}`);
+    }
+    if (path.isAbsolute(decoded)) fail(`SKILL.md local link must be skill-relative: ${destination}`);
+    const resolved = path.resolve(skillDirectory, decoded);
+    if (!isInside(skillDirectory, resolved)) fail(`SKILL.md local link escapes the skill directory: ${destination}`);
+    requireNonemptyRegularFile(resolved, `SKILL.md local link ${destination}`);
+  }
 }
 
 function assertSymlinkFreeTree(directory) {
@@ -135,12 +171,15 @@ function validate(skillDirectory) {
   assertSymlinkFreeTree(skillDirectory);
   const folderName = path.basename(skillDirectory);
   if (!hyphenCase.test(folderName)) fail(`Skill folder must use hyphen-case: ${folderName}`);
-  const fields = parseFrontmatter(readFile(path.join(skillDirectory, "SKILL.md"), "SKILL.md"));
+  const skillSource = readFile(path.join(skillDirectory, "SKILL.md"), "SKILL.md");
+  requireNonemptyRegularFile(path.join(skillDirectory, "SKILL.md"), "SKILL.md");
+  const fields = parseFrontmatter(skillSource);
   if (fields.get("name") !== folderName) {
     fail(`SKILL.md name must match its folder name (${folderName}), received ${fields.get("name")}`);
   }
-  for (const script of requiredScripts) requireRegularFile(path.join(skillDirectory, script), `required script ${script}`);
-  for (const reference of requiredReferences) requireRegularFile(path.join(skillDirectory, reference), `required reference ${reference}`);
+  for (const script of requiredScripts) requireNonemptyRegularFile(path.join(skillDirectory, script), `required script ${script}`);
+  for (const reference of requiredReferences) requireNonemptyRegularFile(path.join(skillDirectory, reference), `required reference ${reference}`);
+  validateLocalMarkdownLinks(skillDirectory, skillSource);
   validateAgentMetadata(path.join(skillDirectory, "agents", "openai.yaml"), folderName);
 }
 

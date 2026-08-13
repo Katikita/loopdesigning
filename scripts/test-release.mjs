@@ -12,6 +12,16 @@ const validator = path.join(root, "scripts", "validate-skill.mjs");
 const verifier = path.join(root, "scripts", "verify-clean-install.mjs");
 const sourceSkill = path.join(root, "loop-designing");
 const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-release-test-"));
+const requiredArtifacts = [
+  "SKILL.md",
+  "scripts/loop.mjs",
+  "scripts/test-harness.mjs",
+  "references/configuration.md",
+  "references/evaluation-contract.md",
+  "references/memory-contract.md",
+  "references/run-contract.md",
+  "references/visual-fidelity-contract.md",
+];
 
 function copySkill(name) {
   const destination = path.join(fixtureRoot, name, "loop-designing");
@@ -36,16 +46,24 @@ try {
   run(validator, sourceSkill, 0, "positive validator");
   run(verifier, sourceSkill, 0, "positive clean-install verifier");
 
-  rejects("missing-skill", (skill) => fs.rmSync(path.join(skill, "SKILL.md")));
-  rejects("missing-cli", (skill) => fs.rmSync(path.join(skill, "scripts", "loop.mjs")));
-  rejects("missing-visual-fidelity-contract", (skill) => {
-    fs.rmSync(path.join(skill, "references", "visual-fidelity-contract.md"));
+  for (const artifact of requiredArtifacts) {
+    const fixtureName = artifact.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase();
+    rejects(`missing-${fixtureName}`, (skill) => fs.rmSync(path.join(skill, artifact)));
+    rejects(`empty-${fixtureName}`, (skill) => fs.writeFileSync(path.join(skill, artifact), ""));
+    rejects(`symlink-${fixtureName}`, (skill) => {
+      const file = path.join(skill, artifact);
+      const external = path.join(path.dirname(skill), `external-${fixtureName}`);
+      fs.renameSync(file, external);
+      fs.symlinkSync(external, file);
+    });
+  }
+  rejects("missing-linked-reference", (skill) => {
+    fs.appendFileSync(path.join(skill, "SKILL.md"), "\n[Missing runtime contract](references/missing-contract.md)\n");
   });
-  rejects("final-script-symlink", (skill) => {
-    const cli = path.join(skill, "scripts", "loop.mjs");
-    const external = path.join(path.dirname(skill), "external-loop.mjs");
-    fs.renameSync(cli, external);
-    fs.symlinkSync(external, cli);
+  rejects("escaping-linked-reference", (skill) => {
+    const external = path.join(path.dirname(skill), "outside-contract.md");
+    fs.writeFileSync(external, "Outside the installable skill.\n");
+    fs.appendFileSync(path.join(skill, "SKILL.md"), "\n[Escaping runtime contract](../outside-contract.md)\n");
   });
   rejects("root-symlink", (skill) => {
     const target = path.join(path.dirname(skill), "real-skill");
