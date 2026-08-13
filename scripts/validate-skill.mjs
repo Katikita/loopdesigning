@@ -41,7 +41,7 @@ function requireRegularFile(file, label) {
 
 function requireNonemptyRegularFile(file, label) {
   requireRegularFile(file, label);
-  if (fs.statSync(file).size === 0) fail(`${label} must be non-empty: ${path.relative(process.cwd(), file) || file}`);
+  if (!readFile(file, label).trim()) fail(`${label} must contain non-whitespace text: ${path.relative(process.cwd(), file) || file}`);
 }
 
 function isInside(root, candidate) {

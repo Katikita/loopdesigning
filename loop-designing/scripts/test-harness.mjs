@@ -622,6 +622,16 @@ fs.writeFileSync = function(file, value, options) {
   fs.writeFileSync(path.join(memoryAliasWorkspace, "loop-designing.config.json"), `${JSON.stringify(memoryAliasConfig, null, 2)}\n`);
   const aliasedMemoryStores = runAt(memoryAliasWorkspace, ["status"], 1);
   assert.match(aliasedMemoryStores.error, /approved and rejected memory stores must resolve to different files/);
+  fs.unlinkSync(path.join(memoryAliasWorkspace, "memory", "rejected.jsonl"));
+  fs.linkSync(path.join(memoryAliasWorkspace, "memory", "approved.jsonl"), path.join(memoryAliasWorkspace, "memory", "rejected-hardlink.jsonl"));
+  memoryAliasConfig.memory = { approved: "memory/approved.jsonl", rejected: "memory/rejected-hardlink.jsonl" };
+  fs.writeFileSync(path.join(memoryAliasWorkspace, "loop-designing.config.json"), `${JSON.stringify(memoryAliasConfig, null, 2)}\n`);
+  const hardlinkedMemoryStores = runAt(memoryAliasWorkspace, ["status"], 1);
+  assert.match(hardlinkedMemoryStores.error, /approved and rejected memory stores must resolve to different files/);
+  memoryAliasConfig.memory = { approved: "memory/Future.jsonl", rejected: "memory/future.jsonl" };
+  fs.writeFileSync(path.join(memoryAliasWorkspace, "loop-designing.config.json"), `${JSON.stringify(memoryAliasConfig, null, 2)}\n`);
+  const caseEquivalentMemoryStores = runAt(memoryAliasWorkspace, ["status"], 1);
+  assert.match(caseEquivalentMemoryStores.error, /approved and rejected memory stores must resolve to different files/);
 
   fs.writeFileSync(path.join(symlinkOutside, "escaped-context.md"), "Escaped product canon.\n");
   fs.symlinkSync(symlinkOutside, path.join(transactionalStartWorkspace, "context-link"));

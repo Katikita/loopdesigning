@@ -239,6 +239,14 @@ function canonicalDestination(file) {
   return path.resolve(fs.realpathSync(existing), path.relative(existing, file));
 }
 
+function sameCanonicalDestination(first, second) {
+  if (canonicalDestination(first).toLowerCase() === canonicalDestination(second).toLowerCase()) return true;
+  if (!pathExists(first) || !pathExists(second)) return false;
+  const firstIdentity = fs.statSync(first);
+  const secondIdentity = fs.statSync(second);
+  return firstIdentity.dev === secondIdentity.dev && firstIdentity.ino === secondIdentity.ino;
+}
+
 function descendant(root, label, ...parts) {
   return resolveInside(root, path.join(...parts), label);
 }
@@ -507,7 +515,7 @@ function pathsFor(workspace, config) {
   const runsDir = resolveInside(workspace, config.runsDir, "config.runsDir");
   const approved = resolveInside(workspace, config.memory.approved, "config.memory.approved");
   const rejected = resolveInside(workspace, config.memory.rejected, "config.memory.rejected");
-  if (canonicalDestination(approved) === canonicalDestination(rejected)) {
+  if (sameCanonicalDestination(approved, rejected)) {
     die("config approved and rejected memory stores must resolve to different files");
   }
   return { runsDir, approved, rejected };

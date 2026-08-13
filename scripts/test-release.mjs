@@ -50,6 +50,7 @@ try {
     const fixtureName = artifact.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase();
     rejects(`missing-${fixtureName}`, (skill) => fs.rmSync(path.join(skill, artifact)));
     rejects(`empty-${fixtureName}`, (skill) => fs.writeFileSync(path.join(skill, artifact), ""));
+    rejects(`whitespace-${fixtureName}`, (skill) => fs.writeFileSync(path.join(skill, artifact), " \n\t\n"));
     rejects(`symlink-${fixtureName}`, (skill) => {
       const file = path.join(skill, artifact);
       const external = path.join(path.dirname(skill), `external-${fixtureName}`);
