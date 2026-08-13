@@ -27,10 +27,10 @@ You need:
 
 ### 2. Install the skill
 
-Clone the current public-beta branch:
+Clone the latest published release:
 
 ```bash
-git clone --branch release/v0.1.0-hardening --single-branch \
+git clone --branch v0.1.0 --single-branch \
   https://github.com/Katikita/loopdesigning.git
 ```
 
