@@ -12,15 +12,20 @@ Require Node.js 18 or newer and access to a bitmap image-generation capability.
 ## Initialize or resume
 
 1. Locate `loop-designing.config.json` in the host workspace root.
-2. If it is missing, run `node <skill-dir>/scripts/loop.mjs init` and customize the generated config. When the clean-worktree guard is enabled, ask the user to commit the config or explicitly authorize `--allow-dirty`; never commit automatically.
-3. Run `node <skill-dir>/scripts/loop.mjs status` before acting. Resume a non-terminal run unless the user explicitly requests a new requirement.
-4. For a new run, save the requirement and run:
+2. If it is missing, run `node <skill-dir>/scripts/loop.mjs init` and customize the generated config and `project-context.md` scaffold. When the clean-worktree guard is enabled, ask the user to commit the generated files or explicitly authorize `--allow-dirty`; never commit automatically.
+3. Run `node <skill-dir>/scripts/loop.mjs status` before acting. Resume a non-terminal run unless the user explicitly requests a new requirement. Read every artifact referenced by the active state that applies to its next action. In `awaiting-implementation`, if `implementationRevision` is non-null, read that file verbatim and treat it as mandatory additional critique alongside the selected concept and original critique.
+4. For a new run, recommend gathering project background in `project-context.md`: product purpose, primary users, current design experience, product and technical constraints, and success criteria. The current design experience is the interface, visual language, interaction patterns, and existing user journey. If this background is missing or unfilled, invite the user to provide it; never infer it from a screenshot or reference. This is recommended context, not a start gate: when the user declines, proceed with the background they supplied.
+5. Inventory these optional design-context groups before saving the requirement:
+   - **Design system:** `tokens`, `typography`, `layout`, `components`
+   - **Reference screens:** `reference-screen`
+   - **Design rules:** `approved-decisions`, `rejected-patterns`, `accessibility`
+   Present the supplied items and the optional gaps. If no source is supplied, pause and ask the user for one concrete local file or HTTP(S) URL; time pressure does not waive this start requirement. Never invent missing context. Warn that one source is sparse, but proceed when the user supplies it. Run:
 
    ```bash
-   node <skill-dir>/scripts/loop.mjs start --requirement-file <path> [--ref <path-or-url>] [--tag <tag>]
+   node <skill-dir>/scripts/loop.mjs start --requirement-file <path> --design-context <kind=source> [--design-context <kind=source>] [--tag <tag>]
    ```
 
-5. Read the generated `context/context.md`. It contains the snapshotted project rules and retrieved approved and rejected memory.
+6. Read the generated `context/context.md`. It contains the snapshotted project rules and retrieved approved and rejected memory.
 
 If the clean-worktree guard blocks a start, never reset or stash user work. Use `--allow-dirty` only when the user confirms the existing changes belong to the run.
 
@@ -28,6 +33,7 @@ Read these references when their stage applies:
 
 - [references/configuration.md](references/configuration.md) when initializing or changing project inputs and checks.
 - [references/run-contract.md](references/run-contract.md) when starting, resuming, registering artifacts, or routing iteration.
+- [references/visual-fidelity-contract.md](references/visual-fidelity-contract.md) after concept selection and throughout implementation QA.
 - [references/evaluation-contract.md](references/evaluation-contract.md) before evaluation.
 - [references/memory-contract.md](references/memory-contract.md) before proposing or approving memory.
 
@@ -49,18 +55,22 @@ Read these references when their stage applies:
 
 ### 3. Implement the selection
 
-- Implement only the selected concept and explicit critique. Treat it as an unapproved candidate until the final verdict.
+- Implement only the selected concept, explicit critique, and any pending `implementationRevision` feedback. A pending revision is mandatory additional critique: read it from run state after every resume and address it in the next implementation attempt. Treat the result as an unapproved candidate until the final verdict.
+- Before writing code, use the visual-fidelity contract to assess every visually important element and complete every required human asset decision. Keep structural UI, text, controls, state, responsive behavior, and accessibility code-native when ImageGen or another asset fills a visual gap.
 - Classify every named external system as either `reference-only` or `delivery-target`.
 - When the user explicitly authorizes a delivery target, implement there and capture stable IDs, revisions, URLs, build status, and visual evidence where available.
 - If a named system's role is ambiguous, resolve it before implementation. Never infer publication permission from a reference alone.
 - Follow the host workspace's product canon, code rules, and design system.
 - Persist every named system in a targets manifest, including its role, authorization source, completion status, stable IDs, and publication evidence. Use an empty `targets` array when no external system is involved.
-- Capture a summary and evidence for every authorized target, then run `implemented --run <id> --summary-file <path> --targets-manifest <path> [--evidence <path>]`.
+- Capture a summary and evidence for every authorized target. Before presenting the preview or registering the implementation, render at the selected concept's viewport when supported and perform the visual-fidelity contract's side-by-side comparison against the selected concept and every recorded critique item.
+- Record the assessment, asset decisions, comparison viewport, correction-pass count, fidelity result, and remaining disclosed deviations in the implementation summary. Show the compared preview or visual evidence to the human and incorporate any feedback they give at that point.
+- Once the comparison is complete and the evidence is ready for evaluation, run `implemented --run <id> --summary-file <path> --targets-manifest <path> [--evidence <path>]`. When a pending implementation revision exists, the harness archives its verbatim notes as `incorporated-revision.md` with this new attempt before clearing the pending state pointer; any new pre-evaluation feedback for that attempt is recorded separately as `revision-request.md`, and later evaluation packets read the incorporated copy.
+- If the human rejects the preview after registration but before evaluation, preserve their words in a notes file and run `revise-implementation --run <id> --notes-file <path>`. This returns to implementation without requiring command approval or evaluating a candidate already known to be wrong.
 
 ### 4. Evaluate
 
-- Inspect the exact configured check commands, timeout, and environment allowlist. If checks exist, show the fingerprint returned by the first `evaluate --run <id>` call and obtain explicit human approval before rerunning with `--checks-sha256 <fingerprint>`. Approval authorizes those commands to run with the user's filesystem permissions.
-- Run the approved evaluation to build the evaluation packet. Never reuse approval after the check fingerprint changes.
+- Inspect the exact configured check commands, timeout, and environment allowlist. If checks exist and the run has no approval for their exact fingerprint, show the fingerprint returned by `evaluate --run <id>` and obtain explicit human approval before rerunning with `--checks-sha256 <fingerprint>`. Approval authorizes those exact commands to run with the user's filesystem permissions.
+- Run the approved evaluation to build the evaluation packet. The harness reuses an existing approval only while the fingerprint is unchanged; a changed command, timeout, or environment allowlist requires new approval.
 - Read the complete packet and inspect visual evidence or the running interface when UI changed.
 - Write an evidence-backed report and an exact memory proposal using the reference schemas.
 - Register them with `record-evaluation --run <id> --report <path> --memory-proposal <path>`. Use `{ "entries": [] }` when there is no reusable learning.
@@ -68,10 +78,10 @@ Read these references when their stage applies:
 
 ### 5. Record the final verdict
 
-- Record `pass`, `iterate-implementation`, `iterate-concepts`, or `archive` with `verdict`.
+- Record `pass`, `retry-evaluation`, `iterate-implementation`, `iterate-concepts`, or `archive` with `verdict`.
 - A passing verdict must include `--memory-action approve` or `--memory-action skip`.
 - Promote only the proposal shown before the verdict. Never convert raw conversation or evaluator opinion into canonical memory.
-- Route implementation defects back to implementation and direction defects back to concepts.
+- Route an invalid check configuration, transient check-environment failure, or faulty evaluation report to `retry-evaluation`; this preserves the selected concept and implementation and creates a new evaluation attempt. Route implementation defects back to implementation and direction defects back to concepts.
 
 ## Non-negotiable gates
 
@@ -82,3 +92,6 @@ Read these references when their stage applies:
 - Preserve rejected artifacts, critique, failed checks, and prior iterations.
 - Do not silently broaden tag- or project-scoped learning into global memory.
 - Do not commit, push, deploy, publish, or modify an external system unless the user explicitly authorizes that target.
+- Do not silently replace an asset-dependent visual with a code approximation.
+- Do not use ImageGen for implementation assets without the human's explicit asset choice.
+- Do not register an implementation with an unexplained high-impact concept-fidelity mismatch.

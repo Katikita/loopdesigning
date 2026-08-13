@@ -18,6 +18,16 @@ const VALID_STATES = new Set([
   "complete",
   "archived",
 ]);
+const DESIGN_CONTEXT_GROUPS = {
+  tokens: "design-system",
+  typography: "design-system",
+  layout: "design-system",
+  components: "design-system",
+  "reference-screen": "reference-screens",
+  "approved-decisions": "design-rules",
+  "rejected-patterns": "design-rules",
+  accessibility: "design-rules",
+};
 
 class HarnessError extends Error {
   constructor(message, details) {
@@ -55,6 +65,59 @@ function parseArgs(argv) {
 function list(value) {
   if (value === undefined) return [];
   return Array.isArray(value) ? value : [value];
+}
+
+function designContextSummary(entries) {
+  const suppliedKinds = [...new Set(entries.map((entry) => entry.kind))];
+  const missingGroups = [...new Set(Object.values(DESIGN_CONTEXT_GROUPS))].filter((group) => !entries.some((entry) => entry.group === group));
+  return {
+    sourceCount: entries.length,
+    suppliedKinds,
+    missingGroups,
+    sparseWarning: entries.length === 1 ? `Design context is sparse; missing ${missingGroups.join(", ")}.` : "",
+  };
+}
+
+function parseDesignContextArgs(args) {
+  const supplied = [
+    ...list(args.ref).map((value) => ({ kind: "reference-screen", source: value })),
+    ...list(args["design-context"]).map((value) => {
+      if (typeof value !== "string") die("Design context entries must use kind=source");
+      const separator = value.indexOf("=");
+      if (separator < 0) die("Design context entries must use kind=source", value);
+      return { kind: value.slice(0, separator).trim(), source: value.slice(separator + 1).trim() };
+    }),
+  ];
+  if (!supplied.length) die("Provide at least one --ref or --design-context source");
+
+  const seen = new Set();
+  const entries = supplied.map(({ kind, source }) => {
+    if (!kind) die("Design context kind is required");
+    if (!Object.hasOwn(DESIGN_CONTEXT_GROUPS, kind)) die("Unknown design context kind", { kind, supportedKinds: Object.keys(DESIGN_CONTEXT_GROUPS) });
+    if (typeof source !== "string" || !source.trim()) die("Design context source is required", kind);
+    let value = source.trim();
+    if (/[\u0000-\u001f\u007f]/.test(value)) die("Design context source must not contain control characters", kind);
+    const type = /^https?:\/\//i.test(value) ? "url" : "file";
+    if (type === "url") {
+      try {
+        const parsed = new URL(value);
+        if (!["http:", "https:"].includes(parsed.protocol) || !parsed.hostname) throw new Error("Missing HTTP(S) hostname");
+        value = parsed.href;
+      } catch {
+        die("Design context URL must be a valid HTTP(S) URL", value);
+      }
+    }
+    const duplicateKey = `${kind}\u0000${value}`;
+    if (seen.has(duplicateKey)) die("Duplicate design context kind/source", { kind, source: value });
+    seen.add(duplicateKey);
+    return {
+      kind,
+      group: DESIGN_CONTEXT_GROUPS[kind],
+      type,
+      value,
+    };
+  });
+  return { entries, summary: designContextSummary(entries) };
 }
 
 function now() {
@@ -111,6 +174,17 @@ function writeTextNew(file, value) {
   }
 }
 
+function writeTextIfMissing(file, value) {
+  ensureDir(path.dirname(file));
+  try {
+    fs.writeFileSync(file, value, { flag: "wx" });
+    return true;
+  } catch (error) {
+    if (error.code === "EEXIST") return false;
+    die(`Cannot write ${file}`, error.message);
+  }
+}
+
 function pathExists(pathname) {
   try {
     fs.lstatSync(pathname);
@@ -150,6 +224,27 @@ function resolveInside(root, relativePath, label) {
   }
   if (!isInside(realRoot, realExisting)) die(`${label} escapes the workspace through a symlink`, relativePath);
   return resolved;
+}
+
+function resolveDesignContextSource(workspace, source) {
+  const lexicalRoot = path.resolve(workspace);
+  const resolved = path.isAbsolute(source) ? path.resolve(source) : path.resolve(lexicalRoot, source);
+  if (!isInside(lexicalRoot, resolved)) die("design context source must stay inside the workspace", source);
+  return resolveInside(lexicalRoot, path.relative(lexicalRoot, resolved) || ".", "design context source");
+}
+
+function canonicalDestination(file) {
+  let existing = file;
+  while (!pathExists(existing)) existing = path.dirname(existing);
+  return path.resolve(fs.realpathSync(existing), path.relative(existing, file));
+}
+
+function sameCanonicalDestination(first, second) {
+  if (canonicalDestination(first).toLowerCase() === canonicalDestination(second).toLowerCase()) return true;
+  if (!pathExists(first) || !pathExists(second)) return false;
+  const firstIdentity = fs.statSync(first);
+  const secondIdentity = fs.statSync(second);
+  return firstIdentity.dev === secondIdentity.dev && firstIdentity.ino === secondIdentity.ino;
 }
 
 function descendant(root, label, ...parts) {
@@ -420,7 +515,23 @@ function pathsFor(workspace, config) {
   const runsDir = resolveInside(workspace, config.runsDir, "config.runsDir");
   const approved = resolveInside(workspace, config.memory.approved, "config.memory.approved");
   const rejected = resolveInside(workspace, config.memory.rejected, "config.memory.rejected");
+  if (sameCanonicalDestination(approved, rejected)) {
+    die("config approved and rejected memory stores must resolve to different files");
+  }
   return { runsDir, approved, rejected };
+}
+
+function preflightContextFiles(workspace, config) {
+  for (const source of config.contextFiles) {
+    const sourceFile = resolveInside(workspace, source, "context file");
+    if (!fs.existsSync(sourceFile)) continue;
+    if (!fs.statSync(sourceFile).isFile()) die("Context source must be a regular file", source);
+    try {
+      fs.accessSync(sourceFile, fs.constants.R_OK);
+    } catch {
+      die("Context source must be readable", source);
+    }
+  }
 }
 
 function listRuns(runsDir) {
@@ -473,7 +584,7 @@ function requireState(state, expected) {
   if (state.status !== expected) die(`Expected state ${expected}; run is ${state.status}`);
 }
 
-function copyArtifact(source, destinationDir, preferredName) {
+function copyArtifact(source, destinationDir, preferredName, expectedIdentity = null) {
   const resolved = path.resolve(source);
   if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) die("Artifact must be an existing local file", source);
   ensureDir(destinationDir);
@@ -482,8 +593,66 @@ function copyArtifact(source, destinationDir, preferredName) {
   let destination = descendant(destinationDir, "artifact destination", `${base}${ext}`);
   let counter = 2;
   while (fs.existsSync(destination)) destination = descendant(destinationDir, "artifact destination", `${base}-${counter++}${ext}`);
+  if (expectedIdentity) {
+    let descriptor;
+    try {
+      descriptor = fs.openSync(resolved, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+      const current = fs.fstatSync(descriptor);
+      if (current.dev !== expectedIdentity.dev || current.ino !== expectedIdentity.ino) {
+        die("Design context source changed after validation", source);
+      }
+      fs.writeFileSync(destination, fs.readFileSync(descriptor), { flag: "wx" });
+    } catch (error) {
+      if (error instanceof HarnessError) throw error;
+      die("Cannot copy design context source", { source, error: error.message });
+    } finally {
+      if (descriptor !== undefined) fs.closeSync(descriptor);
+    }
+    return destination;
+  }
   fs.copyFileSync(resolved, destination);
   return destination;
+}
+
+function preflightDesignContext(workspace, parsed) {
+  const seenLocal = new Set();
+  const entries = parsed.entries.map((entry) => {
+    if (entry.type === "url") return entry;
+    const source = resolveDesignContextSource(workspace, entry.value);
+    if (!fs.existsSync(source)) die("Design context source must be an existing local file", entry.value);
+    const identity = fs.statSync(source);
+    if (!identity.isFile()) die("Design context source must be an existing local file", entry.value);
+    try {
+      fs.accessSync(source, fs.constants.R_OK);
+    } catch {
+      die("Design context source must be a readable local file", entry.value);
+    }
+    const duplicateKey = `${entry.kind}\u0000${identity.dev}\u0000${identity.ino}`;
+    if (seenLocal.has(duplicateKey)) die("Duplicate design context kind/source", { kind: entry.kind, source: entry.value });
+    seenLocal.add(duplicateKey);
+    return { ...entry, source, copySource: fs.realpathSync(source), identity: { dev: identity.dev, ino: identity.ino } };
+  });
+  return { ...parsed, entries };
+}
+
+function prepareDesignContext(workspace, runDir, designContext) {
+  const referencesDir = descendant(runDir, "references directory", "references");
+  const entries = designContext.entries.map((entry) => {
+    if (entry.type === "url") return entry;
+    const stored = copyArtifact(entry.copySource, referencesDir, entry.kind, entry.identity);
+    return {
+      kind: entry.kind,
+      group: entry.group,
+      type: entry.type,
+      source: entry.source,
+      stored: relative(workspace, stored),
+      sha256: sha256(stored),
+    };
+  });
+  const manifestFile = descendant(referencesDir, "design context manifest", "design-context.json");
+  writeJson(descendant(referencesDir, "references manifest", "manifest.json"), { references: entries });
+  writeJson(manifestFile, { entries, summary: designContext.summary });
+  return { manifest: relative(workspace, manifestFile), entries, summary: designContext.summary };
 }
 
 function relative(workspace, file) {
@@ -501,7 +670,9 @@ function retrieveMemory(entries, config, tags) {
   });
 }
 
-function snapshotContext(workspace, config, runDir, requirement, refs, tags, approved, rejected) {
+function snapshotContext(workspace, config, runDir, requirement, designContext, tags, approved, rejected) {
+  const labelEntry = (entry) => `- [${entry.kind}] ${entry.type === "file" ? entry.stored : entry.value}`;
+  const entriesFor = (group) => designContext.entries.filter((entry) => entry.group === group);
   const sections = [
     "# Loop Designing context snapshot",
     "",
@@ -513,17 +684,19 @@ function snapshotContext(workspace, config, runDir, requirement, refs, tags, app
     "",
     requirement.trim(),
     "",
-    "## References",
+    "## Design context",
     "",
-    ...(refs.length ? refs.map((ref) => `- ${ref.type === "file" ? ref.stored : ref.value}`) : ["- None supplied"]),
+    "### Design system",
     "",
-    "## Retrieved approved memory",
+    ...(entriesFor("design-system").length ? entriesFor("design-system").map(labelEntry) : ["- None supplied"]),
     "",
-    ...(approved.length ? approved.map((entry) => `- [${entry.id || "unversioned"}] ${entry.statement} — ${entry.rationale}`) : ["- None"]),
+    "### Reference screens",
     "",
-    "## Retrieved rejected memory",
+    ...(entriesFor("reference-screens").length ? entriesFor("reference-screens").map(labelEntry) : ["- None supplied"]),
     "",
-    ...(rejected.length ? rejected.map((entry) => `- [${entry.id || "unversioned"}] ${entry.statement} — ${entry.rationale}`) : ["- None"]),
+    "### Design rules",
+    "",
+    ...(entriesFor("design-rules").length ? entriesFor("design-rules").map(labelEntry) : ["- None supplied"]),
   ];
 
   const sources = [];
@@ -539,16 +712,28 @@ function snapshotContext(workspace, config, runDir, requirement, refs, tags, app
     sections.push("", `## Source: ${source}`, "", content.trim());
   }
 
+  sections.push(
+    "",
+    "## Retrieved approved memory",
+    "",
+    ...(approved.length ? approved.map((entry) => `- [${entry.id || "unversioned"}] ${entry.statement} — ${entry.rationale}`) : ["- None"]),
+    "",
+    "## Retrieved rejected memory",
+    "",
+    ...(rejected.length ? rejected.map((entry) => `- [${entry.id || "unversioned"}] ${entry.statement} — ${entry.rationale}`) : ["- None"]),
+  );
+
   const contextDir = descendant(runDir, "context directory", "context");
   writeText(descendant(contextDir, "context snapshot", "context.md"), `${sections.join("\n")}\n`);
-  writeJson(descendant(contextDir, "context manifest", "manifest.json"), { sources, approvedMemory: approved, rejectedMemory: rejected });
+  writeJson(descendant(contextDir, "context manifest", "manifest.json"), { sources, designContext, approvedMemory: approved, rejectedMemory: rejected });
 }
 
-function gitSnapshot(workspace) {
+function gitSnapshot(workspace, excludedPaths = []) {
   const inside = spawnSync("git", ["rev-parse", "--is-inside-work-tree"], { cwd: workspace, encoding: "utf8" });
   if (inside.status !== 0 || inside.stdout.trim() !== "true") return { isGit: false, head: null, dirty: false, status: "" };
   const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: workspace, encoding: "utf8" });
-  const status = spawnSync("git", ["status", "--short"], { cwd: workspace, encoding: "utf8" });
+  const pathspec = [".", ...excludedPaths.map((file) => `:(exclude,literal)${relative(workspace, file)}`)];
+  const status = spawnSync("git", ["status", "--short", "--", ...pathspec], { cwd: workspace, encoding: "utf8" });
   const statusText = status.status === 0 ? status.stdout : "";
   return {
     isGit: true,
@@ -559,8 +744,12 @@ function gitSnapshot(workspace) {
 }
 
 function commandInit(workspace, args) {
-  const { configFile, config } = loadConfig(workspace, args, true);
+  const loaded = args.force
+    ? { configFile: resolveInside(workspace, args.config || CONFIG_NAME, "config path"), config: null }
+    : loadConfig(workspace, args, true);
+  const { configFile, config } = loaded;
   if (config && !args.force) die(`${CONFIG_NAME} already exists; use --force to replace it`);
+  const projectContextFile = resolveInside(workspace, "project-context.md", "project context path");
   const initial = {
     schemaVersion: 1,
     projectId: path.basename(workspace),
@@ -573,15 +762,21 @@ function commandInit(workspace, args) {
       approved: "loop-designing/memory/approved.jsonl",
       rejected: "loop-designing/memory/rejected.jsonl",
     },
-    contextFiles: [],
+    contextFiles: ["project-context.md"],
     checks: [],
     checkEnvAllowlist: [],
   };
   writeJson(configFile, initial);
-  output({ action: "init", config: relative(workspace, configFile), generatedPaths: [relative(workspace, configFile)] });
+  const generatedPaths = [relative(workspace, configFile)];
+  if (writeTextIfMissing(projectContextFile, "# Project context\n\n## Product purpose\n\n## Primary users\n\n## Current design experience\n\n## Product and technical constraints\n\n## Success criteria\n")) {
+    generatedPaths.push(relative(workspace, projectContextFile));
+  }
+  output({ action: "init", config: relative(workspace, configFile), generatedPaths });
 }
 
 function commandStart(workspace, config, args) {
+  const parsedDesignContext = parseDesignContextArgs(args);
+  const designContext = preflightDesignContext(workspace, parsedDesignContext);
   const resolved = pathsFor(workspace, config);
   ensureDir(resolved.runsDir);
   const active = listRuns(resolved.runsDir).find((run) => !TERMINAL_STATES.has(run.status));
@@ -591,7 +786,7 @@ function commandStart(workspace, config, args) {
   const requirement = requirementFile ? readText(requirementFile) : args.requirement;
   if (!requirement || !String(requirement).trim()) die("Provide --requirement-file or --requirement");
   const tags = list(args.tag).map(String);
-  const baseline = gitSnapshot(workspace);
+  const baseline = gitSnapshot(workspace, [descendant(resolved.runsDir, "transition lock", ".harness.lock")]);
   if (config.requireCleanWorktree && baseline.isGit && baseline.dirty && !args["allow-dirty"]) {
     die("The workspace has uncommitted changes. Commit/stash them or explicitly use --allow-dirty when they belong to this run.", baseline.status);
   }
@@ -599,46 +794,43 @@ function commandStart(workspace, config, args) {
   if (!/^[a-zA-Z0-9._-]+$/.test(runId)) die("Run id may contain only letters, numbers, dot, underscore, and hyphen");
   const runDir = resolveInside(resolved.runsDir, runId, "run id");
   if (fs.existsSync(runDir)) die(`Run ${runId} already exists`);
-  for (const dir of ["references", "concepts", "critique", "implementation", "evaluation", "verdict", "context"]) ensureDir(descendant(runDir, `${dir} directory`, dir));
   const requirementPath = descendant(runDir, "requirement artifact", "requirement.md");
-  writeText(requirementPath, `${String(requirement).trim()}\n`);
+  let preparedDesignContext;
+  let state;
+  try {
+    for (const dir of ["references", "concepts", "critique", "implementation", "evaluation", "verdict", "context"]) ensureDir(descendant(runDir, `${dir} directory`, dir));
+    writeText(requirementPath, `${String(requirement).trim()}\n`);
+    preparedDesignContext = prepareDesignContext(workspace, runDir, designContext);
+    const approved = retrieveMemory(readJsonl(resolved.approved), config, tags);
+    const rejected = retrieveMemory(readJsonl(resolved.rejected), config, tags);
+    snapshotContext(workspace, config, runDir, String(requirement), preparedDesignContext, tags, approved, rejected);
 
-  const refs = [];
-  for (const ref of list(args.ref).map(String)) {
-    if (/^https?:\/\//i.test(ref)) refs.push({ type: "url", value: ref });
-    else {
-      const stored = copyArtifact(ref, descendant(runDir, "references directory", "references"));
-      refs.push({ type: "file", source: path.resolve(ref), stored: relative(workspace, stored), sha256: sha256(stored) });
-    }
+    const createdAt = now();
+    state = {
+      schemaVersion: 1,
+      revision: 0,
+      runId,
+      projectId: config.projectId,
+      status: "awaiting-concepts",
+      iteration: 1,
+      implementationAttempt: 0,
+      evaluationAttempt: 0,
+      createdAt,
+      updatedAt: createdAt,
+      tags,
+      requirement: relative(workspace, requirementPath),
+      references: preparedDesignContext.entries,
+      designContext: preparedDesignContext,
+      baseline,
+      selectedConcept: null,
+      transitions: [{ from: null, to: "awaiting-concepts", event: "start", at: createdAt }],
+    };
+    writeJson(descendant(runDir, "run state", "state.json"), state);
+  } catch (error) {
+    fs.rmSync(runDir, { recursive: true, force: true });
+    throw error;
   }
-  writeJson(descendant(runDir, "references manifest", "references", "manifest.json"), { references: refs });
-
-  appendJsonl(resolved.approved, []);
-  appendJsonl(resolved.rejected, []);
-  const approved = retrieveMemory(readJsonl(resolved.approved), config, tags);
-  const rejected = retrieveMemory(readJsonl(resolved.rejected), config, tags);
-  snapshotContext(workspace, config, runDir, String(requirement), refs, tags, approved, rejected);
-
-  const createdAt = now();
-  const state = {
-    schemaVersion: 1,
-    revision: 0,
-    runId,
-    projectId: config.projectId,
-    status: "awaiting-concepts",
-    iteration: 1,
-    implementationAttempt: 0,
-    createdAt,
-    updatedAt: createdAt,
-    tags,
-    requirement: relative(workspace, requirementPath),
-    references: refs,
-    baseline,
-    selectedConcept: null,
-    transitions: [{ from: null, to: "awaiting-concepts", event: "start", at: createdAt }],
-  };
-  writeJson(descendant(runDir, "run state", "state.json"), state);
-  output({ action: "start", runId, state: state.status, runDir: relative(workspace, runDir), context: relative(workspace, descendant(runDir, "context snapshot", "context", "context.md")) });
+  output({ action: "start", runId, state: state.status, runDir: relative(workspace, runDir), context: relative(workspace, descendant(runDir, "context snapshot", "context", "context.md")), designContextSummary: preparedDesignContext.summary });
 }
 
 function commandStatus(workspace, config, args) {
@@ -739,7 +931,7 @@ function gitCapture(workspace, config, implementationDir) {
   const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: workspace, encoding: "utf8" });
   const ignoredRoots = [config.runsDir, config.memory.approved, config.memory.rejected]
     .map((entry) => path.normalize(entry).split(path.sep).join("/").replace(/^\.\//, ""));
-  const pathspec = [".", ...ignoredRoots.map((root) => `:(exclude)${root}`)];
+  const pathspec = [".", ...ignoredRoots.map((root) => `:(exclude,literal)${root}`)];
   const diffOptions = ["--binary", "--no-color"];
   let diffText = "";
   if (head.status === 0) {
@@ -815,13 +1007,23 @@ function commandImplemented(workspace, config, args) {
   if (config.requireVisualEvidence && !inspectedEvidence.some((entry) => entry.bitmap)) {
     die("At least one valid PNG, JPG, or WebP --evidence file is required by project config");
   }
+  const pendingRevision = state.implementationRevision
+    ? readText(resolveInside(workspace, state.implementationRevision, "implementation revision request"))
+    : null;
   state.implementationAttempt += 1;
+  state.evaluationAttempt = 0;
   const implementationDir = descendant(runDir, "implementation directory", "implementation", `iteration-${state.iteration}-attempt-${state.implementationAttempt}`);
   ensureDir(implementationDir);
   const summaryFile = descendant(implementationDir, "implementation summary", "summary.md");
   const targetsFile = descendant(implementationDir, "targets manifest", "targets.json");
   writeText(summaryFile, `${summary.trim()}\n`);
   writeJson(targetsFile, targets);
+  let archivedRevision = null;
+  if (pendingRevision !== null) {
+    const revisionFile = descendant(implementationDir, "incorporated implementation revision", "incorporated-revision.md");
+    writeTextNew(revisionFile, pendingRevision);
+    archivedRevision = { path: relative(workspace, revisionFile), sha256: sha256(revisionFile) };
+  }
   const storedEvidence = inspectedEvidence.map(({ file, bitmap }, index) => {
     const stored = copyArtifact(file, descendant(implementationDir, "implementation evidence directory", "evidence"), `evidence-${index + 1}`);
     return { path: relative(workspace, stored), sha256: sha256(stored), bitmap };
@@ -835,11 +1037,43 @@ function commandImplemented(workspace, config, args) {
     untrackedFiles: git.untrackedFiles,
     targets: { path: relative(workspace, targetsFile), sha256: sha256(targetsFile) },
     evidence: storedEvidence,
+    revision: archivedRevision,
     capturedAt: now(),
   });
   state.implementation = relative(workspace, implementationDir);
+  state.implementationRevision = null;
   transition(stateFile, state, "awaiting-evaluation", "implementation-recorded", { implementation: state.implementation });
   output({ action: "implemented", runId: state.runId, state: state.status, implementation: state.implementation, evidence: storedEvidence });
+}
+
+function commandReviseImplementation(workspace, config, args) {
+  const { stateFile, state } = getState(workspace, config, args.run);
+  requireState(state, "awaiting-evaluation");
+  if (!args["notes-file"]) die("Provide --notes-file with the human's pre-evaluation implementation feedback");
+  const notes = readText(path.resolve(args["notes-file"]));
+  if (!notes.trim()) die("Implementation revision notes cannot be empty");
+  if (!state.implementation) die("No implementation exists to revise");
+
+  const implementationDir = resolveInside(workspace, state.implementation, "implementation");
+  const revisionFile = descendant(implementationDir, "implementation revision request", "revision-request.md");
+  writeTextNew(revisionFile, notes);
+  try {
+    state.implementationRevision = relative(workspace, revisionFile);
+    transition(stateFile, state, "awaiting-implementation", "human-pre-evaluation-revision", {
+      implementation: state.implementation,
+      revision: state.implementationRevision,
+    });
+  } catch (error) {
+    try { fs.unlinkSync(revisionFile); } catch {}
+    throw error;
+  }
+  output({
+    action: "revise-implementation",
+    runId: state.runId,
+    state: state.status,
+    implementation: state.implementation,
+    revision: state.implementationRevision,
+  });
 }
 
 function checkApprovalFingerprint(config) {
@@ -895,9 +1129,11 @@ function commandEvaluate(workspace, config, args) {
   const { runDir, stateFile, state } = getState(workspace, config, args.run);
   requireState(state, "awaiting-evaluation");
   let checkApproval = null;
+  let approval = "not-required";
   if (config.checks.length) {
     const expected = checkApprovalFingerprint(config);
-    if (args["checks-sha256"] !== expected) {
+    const previousApproval = state.checkApproval?.sha256 === expected ? state.checkApproval : null;
+    if (args["checks-sha256"] !== expected && !previousApproval) {
       die("Configured checks can execute programs. Review the exact commands and environment allowlist, obtain explicit human approval, then rerun with --checks-sha256 <fingerprint>.", {
         checksSha256: expected,
         checks: config.checks,
@@ -905,14 +1141,25 @@ function commandEvaluate(workspace, config, args) {
         checkTimeoutMs: config.checkTimeoutMs || 180000,
       });
     }
-    checkApproval = {
-      sha256: expected,
-      checks: config.checks,
-      checkEnvAllowlist: config.checkEnvAllowlist || [],
-      approvedAt: now(),
-    };
+    if (args["checks-sha256"] === expected) {
+      checkApproval = {
+        sha256: expected,
+        checks: config.checks,
+        checkEnvAllowlist: config.checkEnvAllowlist || [],
+        approvedAt: now(),
+      };
+      approval = "approved";
+    } else {
+      checkApproval = { ...previousApproval, reusedAt: now() };
+      approval = "reused";
+    }
   }
-  const evaluationDir = descendant(runDir, "evaluation directory", "evaluation", `iteration-${state.iteration}-attempt-${state.implementationAttempt}`);
+  const previousEvaluationAttempt = Number.isInteger(state.evaluationAttempt) && state.evaluationAttempt >= 0 ? state.evaluationAttempt : 0;
+  const evaluationAttempt = previousEvaluationAttempt + 1;
+  const evaluationName = evaluationAttempt === 1
+    ? `iteration-${state.iteration}-attempt-${state.implementationAttempt}`
+    : `iteration-${state.iteration}-attempt-${state.implementationAttempt}-evaluation-${evaluationAttempt}`;
+  const evaluationDir = descendant(runDir, "evaluation directory", "evaluation", evaluationName);
   ensureDir(evaluationDir);
   if (checkApproval) writeJson(descendant(evaluationDir, "check approval artifact", "check-approval.json"), checkApproval);
   const results = runChecks(workspace, config.checks, evaluationDir, config.checkTimeoutMs || 180000, config.checkEnvAllowlist || []);
@@ -923,12 +1170,17 @@ function commandEvaluate(workspace, config, args) {
   const provenance = readJson(provenanceFile);
   const targetsFile = descendant(implementationDir, "targets manifest", "targets.json");
   const targets = readJson(targetsFile);
+  const implementationRevision = provenance.revision
+    ? readText(resolveInside(workspace, provenance.revision.path, "incorporated implementation revision"))
+    : null;
   const stateSnapshot = JSON.stringify({
     runId: state.runId,
     iteration: state.iteration,
     selectedConcept: state.selectedConcept,
     critique: state.critique,
     implementation: state.implementation,
+    implementationRevision: provenance.revision || null,
+    evaluationAttempt,
     checkApproval,
   }, null, 2);
   const sections = [
@@ -947,6 +1199,12 @@ function commandEvaluate(workspace, config, args) {
     "## Human critique",
     "",
     readText(resolveInside(workspace, state.critique, "critique")),
+    ...(implementationRevision === null ? [] : [
+      "",
+      "## Human implementation revision",
+      "",
+      implementationRevision,
+    ]),
     "",
     "## Implementation summary",
     "",
@@ -973,9 +1231,10 @@ function commandEvaluate(workspace, config, args) {
   const packetFile = descendant(evaluationDir, "evaluation packet", "packet.md");
   writeText(packetFile, `${sections.join("\n")}\n`);
   state.evaluation = relative(workspace, evaluationDir);
+  state.evaluationAttempt = evaluationAttempt;
   state.checkApproval = checkApproval;
   transition(stateFile, state, "awaiting-evaluation-report", "evaluation-checks-complete", { allTechnicalChecksPassed: results.every((result) => result.passed), packet: relative(workspace, packetFile), checksSha256: checkApproval?.sha256 || null });
-  output({ action: "evaluate", runId: state.runId, state: state.status, allTechnicalChecksPassed: results.every((result) => result.passed), results, packet: relative(workspace, packetFile) });
+  output({ action: "evaluate", runId: state.runId, state: state.status, approval, evaluationAttempt, allTechnicalChecksPassed: results.every((result) => result.passed), results, packet: relative(workspace, packetFile) });
 }
 
 function validateEvaluationReport(report) {
@@ -1077,7 +1336,7 @@ function commandVerdict(workspace, config, args) {
   const { runDir, stateFile, state } = getState(workspace, config, args.run);
   requireState(state, "awaiting-verdict");
   const decision = args.decision;
-  const allowed = new Set(["pass", "iterate-implementation", "iterate-concepts", "archive"]);
+  const allowed = new Set(["pass", "retry-evaluation", "iterate-implementation", "iterate-concepts", "archive"]);
   if (!allowed.has(decision)) die("Invalid verdict decision", decision);
   const memoryAction = args["memory-action"];
   if (decision === "pass" && !new Set(["approve", "skip"]).has(memoryAction)) {
@@ -1099,7 +1358,11 @@ function commandVerdict(workspace, config, args) {
     promoted = normalizeMemoryProposal(proposal, config, state);
   }
   const verdictDir = descendant(runDir, "verdict directory", "verdict");
-  const verdictFile = descendant(verdictDir, "verdict artifact", `iteration-${state.iteration}-attempt-${state.implementationAttempt}.md`);
+  const evaluationAttempt = Number.isInteger(state.evaluationAttempt) && state.evaluationAttempt > 0 ? state.evaluationAttempt : 1;
+  const verdictName = evaluationAttempt === 1
+    ? `iteration-${state.iteration}-attempt-${state.implementationAttempt}.md`
+    : `iteration-${state.iteration}-attempt-${state.implementationAttempt}-evaluation-${evaluationAttempt}.md`;
+  const verdictFile = descendant(verdictDir, "verdict artifact", verdictName);
   writeTextNew(verdictFile, notes);
 
   let memoryRollback = null;
@@ -1124,6 +1387,19 @@ function commandVerdict(workspace, config, args) {
     const eventData = { decision, verdict: relative(workspace, verdictFile), promotedMemoryIds: promoted.map((entry) => entry.id) };
     if (decision === "pass") transition(stateFile, state, "complete", "human-verdict", eventData);
     else if (decision === "archive") transition(stateFile, state, "archived", "human-verdict", eventData);
+    else if (decision === "retry-evaluation") {
+      const previousEvaluation = {
+        evaluation: state.evaluation,
+        evaluationReport: state.evaluationReport,
+        memoryProposal: state.memoryProposal,
+      };
+      state.evaluationAttempt = evaluationAttempt;
+      state.evaluation = null;
+      state.evaluationReport = null;
+      state.memoryProposal = null;
+      state.memoryProposalSha256 = null;
+      transition(stateFile, state, "awaiting-evaluation", "human-verdict", { ...eventData, previousEvaluation });
+    }
     else if (decision === "iterate-implementation") transition(stateFile, state, "awaiting-implementation", "human-verdict", eventData);
     else {
       const previousIteration = state.iteration;
@@ -1153,7 +1429,7 @@ function commandVerdict(workspace, config, args) {
 }
 
 function printHelp() {
-  process.stdout.write(`Loop Designing harness\n\nCommands:\n  init\n  status [--run <id>]\n  start --requirement-file <path> [--ref <path-or-url>] [--tag <tag>] [--allow-dirty]\n  concepts --run <id> --manifest <path>\n  critique --run <id> --decision <select|iterate> --notes-file <path> [--selection <id>]\n  implemented --run <id> --summary-file <path> --targets-manifest <path> [--evidence <path>]\n  evaluate --run <id> [--checks-sha256 <approved-fingerprint>]\n  record-evaluation --run <id> --report <path> --memory-proposal <path>\n  verdict --run <id> --decision <pass|iterate-implementation|iterate-concepts|archive> --notes-file <path> [--memory-action <approve|skip>]\n`);
+  process.stdout.write(`Loop Designing harness\n\nCommands:\n  init\n  status [--run <id>]\n  start --requirement-file <path> (--ref <path-or-url> | --design-context <kind=path-or-url>) [--ref <path-or-url>] [--design-context <kind=path-or-url>] [--tag <tag>] [--allow-dirty]\n  concepts --run <id> --manifest <path>\n  critique --run <id> --decision <select|iterate> --notes-file <path> [--selection <id>]\n  implemented --run <id> --summary-file <path> --targets-manifest <path> [--evidence <path>]\n  revise-implementation --run <id> --notes-file <path>\n  evaluate --run <id> [--checks-sha256 <approved-fingerprint>]\n  record-evaluation --run <id> --report <path> --memory-proposal <path>\n  verdict --run <id> --decision <pass|retry-evaluation|iterate-implementation|iterate-concepts|archive> --notes-file <path> [--memory-action <approve|skip>]\n\nFor start, supply at least one repeatable --ref or --design-context source.\n`);
 }
 
 function main() {
@@ -1178,6 +1454,7 @@ function main() {
     concepts: commandConcepts,
     critique: commandCritique,
     implemented: commandImplemented,
+    "revise-implementation": commandReviseImplementation,
     evaluate: commandEvaluate,
     "record-evaluation": commandRecordEvaluation,
     verdict: commandVerdict,
@@ -1187,6 +1464,10 @@ function main() {
   if (command === "status") {
     commands[command](workspace, config, args);
     return;
+  }
+  if (command === "start") {
+    preflightDesignContext(workspace, parseDesignContextArgs(args));
+    preflightContextFiles(workspace, config);
   }
   const { runsDir } = pathsFor(workspace, config);
   ensureDir(runsDir);

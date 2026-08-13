@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -11,9 +12,15 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const cli = path.join(here, "loop.mjs");
 const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-test-"));
 const guardWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-guard-test-"));
+const cleanLockWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-clean-lock-test-"));
+const metacharacterLockWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-metacharacter-lock-test-"));
 const invalidWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-invalid-test-"));
 const symlinkWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-symlink-test-"));
 const symlinkOutside = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-outside-test-"));
+const onboardingWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-onboarding-test-"));
+const concurrentInitWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-concurrent-init-test-"));
+const memoryAliasWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-memory-alias-test-"));
+const transactionalStartWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "loop-designing-transactional-start-test-"));
 
 function write(relativePath, value) {
   const file = path.join(workspace, relativePath);
@@ -22,8 +29,8 @@ function write(relativePath, value) {
   return file;
 }
 
-function runAt(cwd, args, expectedStatus = 0) {
-  const result = spawnSync(process.execPath, [cli, ...args], { cwd, encoding: "utf8" });
+function runAt(cwd, args, expectedStatus = 0, options = {}) {
+  const result = spawnSync(process.execPath, [cli, ...args], { cwd, encoding: "utf8", ...options });
   assert.equal(result.status, expectedStatus, `Command failed: ${args.join(" ")}\n${result.stdout}\n${result.stderr}`);
   const stream = expectedStatus === 0 ? result.stdout : result.stderr;
   return JSON.parse(stream);
@@ -34,6 +41,8 @@ function run(args, expectedStatus = 0) {
 }
 
 function evaluate(runId) {
+  const state = run(["status", "--run", runId]).run;
+  if (state.checkApproval) return run(["evaluate", "--run", runId]);
   const gated = run(["evaluate", "--run", runId], 1);
   assert.match(gated.error, /Configured checks can execute programs/);
   assert.match(gated.details.checksSha256, /^[a-f0-9]{64}$/);
@@ -41,10 +50,180 @@ function evaluate(runId) {
 }
 
 try {
+  const help = spawnSync(process.execPath, [cli, "help"], { encoding: "utf8" });
+  assert.equal(help.status, 0, help.stderr);
+  assert.match(help.stdout, /start --requirement-file <path> \(--ref <path-or-url> \| --design-context <kind=path-or-url>\) \[--ref <path-or-url>\] \[--design-context <kind=path-or-url>\]/);
+  assert.match(help.stdout, /For start, supply at least one repeatable --ref or --design-context source\./);
+  assert.match(help.stdout, /pass\|retry-evaluation\|iterate-implementation\|iterate-concepts\|archive/);
+  assert.match(help.stdout, /revise-implementation --run <id> --notes-file <path>/);
+  const onboardingInitialized = runAt(onboardingWorkspace, ["init"]);
+  assert.equal(onboardingInitialized.action, "init");
+  assert.deepEqual(onboardingInitialized.generatedPaths, ["loop-designing.config.json", "project-context.md"]);
+  const onboardingConfig = JSON.parse(fs.readFileSync(path.join(onboardingWorkspace, "loop-designing.config.json"), "utf8"));
+  assert.deepEqual(onboardingConfig.contextFiles, ["project-context.md"]);
+  assert.equal(fs.readFileSync(path.join(onboardingWorkspace, "project-context.md"), "utf8"), "# Project context\n\n## Product purpose\n\n## Primary users\n\n## Current design experience\n\n## Product and technical constraints\n\n## Success criteria\n");
+  const duplicateInit = runAt(onboardingWorkspace, ["init"], 1);
+  assert.match(duplicateInit.error, /already exists/);
+  fs.writeFileSync(path.join(onboardingWorkspace, "project-context.md"), "Keep this product knowledge.\n");
+  fs.writeFileSync(path.join(onboardingWorkspace, "loop-designing.config.json"), "{");
+  const malformedForceInit = runAt(onboardingWorkspace, ["init", "--force"]);
+  assert.deepEqual(malformedForceInit.generatedPaths, ["loop-designing.config.json"]);
+  assert.equal(fs.readFileSync(path.join(onboardingWorkspace, "project-context.md"), "utf8"), "Keep this product knowledge.\n");
+  const unsupportedSchemaConfig = JSON.parse(fs.readFileSync(path.join(onboardingWorkspace, "loop-designing.config.json"), "utf8"));
+  unsupportedSchemaConfig.schemaVersion = 999;
+  fs.writeFileSync(path.join(onboardingWorkspace, "loop-designing.config.json"), `${JSON.stringify(unsupportedSchemaConfig, null, 2)}\n`);
+  const unsupportedSchemaForceInit = runAt(onboardingWorkspace, ["init", "--force"]);
+  assert.deepEqual(unsupportedSchemaForceInit.generatedPaths, ["loop-designing.config.json"]);
+  assert.equal(fs.readFileSync(path.join(onboardingWorkspace, "project-context.md"), "utf8"), "Keep this product knowledge.\n");
+  const concurrentPreload = path.join(concurrentInitWorkspace, "create-project-context-race.cjs");
+  fs.writeFileSync(concurrentPreload, `const fs = require("node:fs");
+const path = require("node:path");
+const originalWriteFileSync = fs.writeFileSync.bind(fs);
+let competingWriteComplete = false;
+fs.writeFileSync = function(file, value, options) {
+  const projectContext = path.join(process.cwd(), "project-context.md");
+  const pathname = String(file);
+  if (!competingWriteComplete && (pathname === projectContext || pathname.startsWith(projectContext + ".tmp-"))) {
+    originalWriteFileSync(projectContext, "Keep concurrent knowledge.\\n");
+    competingWriteComplete = true;
+  }
+  return originalWriteFileSync(file, value, options);
+};
+`);
+  const concurrentInit = runAt(concurrentInitWorkspace, ["init"], 0, {
+    env: { ...process.env, NODE_OPTIONS: `--require=${concurrentPreload}` },
+  });
+  assert.equal(fs.readFileSync(path.join(concurrentInitWorkspace, "project-context.md"), "utf8"), "Keep concurrent knowledge.\n");
+  assert.deepEqual(concurrentInit.generatedPaths, ["loop-designing.config.json"]);
+  onboardingConfig.runsDir = "runs";
+  onboardingConfig.requireCleanWorktree = false;
+  fs.writeFileSync(path.join(onboardingWorkspace, "loop-designing.config.json"), `${JSON.stringify(onboardingConfig, null, 2)}\n`);
+  const onboardingRequirement = path.join(onboardingWorkspace, "requirement.md");
+  fs.writeFileSync(onboardingRequirement, "Require design context before starting.\n");
+  const noContext = runAt(onboardingWorkspace, ["start", "--id", "LD-no-context", "--requirement-file", onboardingRequirement], 1);
+  assert.match(noContext.error, /Provide at least one --ref or --design-context source/);
+  assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-no-context")), false);
+  fs.mkdirSync(path.join(onboardingWorkspace, "fixtures"), { recursive: true });
+  for (const kind of ["reference-screen", "tokens", "typography", "components", "approved-decisions", "rejected-patterns", "accessibility"]) {
+    fs.writeFileSync(path.join(onboardingWorkspace, "fixtures", `${kind}.md`), `${kind} fixture\n`);
+  }
+  fs.symlinkSync(path.join(onboardingWorkspace, "fixtures", "tokens.md"), path.join(onboardingWorkspace, "fixtures", "tokens-link.md"));
+  fs.symlinkSync(path.join(onboardingWorkspace, "fixtures", "reference-screen.md"), path.join(onboardingWorkspace, "fixtures", "reference-screen-link.md"));
+  const everyKind = runAt(onboardingWorkspace, [
+    "start", "--id", "LD-every-kind", "--requirement-file", onboardingRequirement,
+    "--ref", "fixtures/reference-screen.md",
+    "--design-context", "tokens=fixtures/tokens-link.md",
+    "--design-context", "typography=fixtures/typography.md",
+    "--design-context", "layout=https://example.test/layout",
+    "--design-context", "components=fixtures/components.md",
+    "--design-context", "approved-decisions=fixtures/approved-decisions.md",
+    "--design-context", "rejected-patterns=fixtures/rejected-patterns.md",
+    "--design-context", "accessibility=fixtures/accessibility.md",
+  ]);
+  assert.equal(everyKind.designContextSummary.sourceCount, 8);
+  assert.deepEqual(everyKind.designContextSummary.suppliedKinds, ["reference-screen", "tokens", "typography", "layout", "components", "approved-decisions", "rejected-patterns", "accessibility"]);
+  assert.deepEqual(everyKind.designContextSummary.missingGroups, []);
+  assert.equal(everyKind.designContextSummary.sparseWarning, "");
+  const everyKindState = JSON.parse(fs.readFileSync(path.join(onboardingWorkspace, "runs", "LD-every-kind", "state.json"), "utf8"));
+  assert.equal(everyKindState.designContext.entries.length, 8);
+  assert.match(everyKindState.designContext.manifest, /references\/design-context\.json$/);
+  const everyKindManifest = JSON.parse(fs.readFileSync(path.join(onboardingWorkspace, everyKindState.designContext.manifest), "utf8"));
+  assert.equal(everyKindManifest.entries.find((entry) => entry.kind === "tokens").type, "file");
+  assert.equal(everyKindManifest.entries.find((entry) => entry.kind === "layout").value, "https://example.test/layout");
+  assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-every-kind", "references", "manifest.json")), true);
+  const everyKindContext = JSON.parse(fs.readFileSync(path.join(onboardingWorkspace, "runs", "LD-every-kind", "context", "manifest.json"), "utf8"));
+  assert.equal(everyKindContext.designContext.summary.sourceCount, 8);
+  const everyKindSnapshot = fs.readFileSync(path.join(onboardingWorkspace, "runs", "LD-every-kind", "context", "context.md"), "utf8");
+  assert.match(everyKindSnapshot, /## Design context\n\n### Design system[\s\S]*### Reference screens[\s\S]*### Design rules/);
+  assert.ok(everyKindSnapshot.indexOf("## Design context") < everyKindSnapshot.indexOf("## Retrieved approved memory"));
+  for (const expected of [
+    "- [tokens] runs/LD-every-kind/references/tokens.md",
+    "- [typography] runs/LD-every-kind/references/typography.md",
+    "- [layout] https://example.test/layout",
+    "- [components] runs/LD-every-kind/references/components.md",
+    "- [reference-screen] runs/LD-every-kind/references/reference-screen.md",
+    "- [approved-decisions] runs/LD-every-kind/references/approved-decisions.md",
+    "- [rejected-patterns] runs/LD-every-kind/references/rejected-patterns.md",
+    "- [accessibility] runs/LD-every-kind/references/accessibility.md",
+  ]) assert.match(everyKindSnapshot, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  const twoSources = runAt(onboardingWorkspace, [
+    "start", "--id", "LD-two-sources", "--force-new", "--requirement-file", onboardingRequirement,
+    "--design-context", "tokens=fixtures/tokens.md",
+    "--ref", "fixtures/reference-screen.md",
+  ]);
+  assert.equal(twoSources.designContextSummary.sourceCount, 2);
+  assert.deepEqual(twoSources.designContextSummary.missingGroups, ["design-rules"]);
+  assert.equal(twoSources.designContextSummary.sparseWarning, "");
+  const malformedContext = runAt(onboardingWorkspace, ["start", "--id", "LD-malformed-context", "--requirement-file", onboardingRequirement, "--design-context", "tokens"], 1);
+  assert.match(malformedContext.error, /Design context entries must use kind=source/);
+  assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-malformed-context")), false);
+  const missingKind = runAt(onboardingWorkspace, ["start", "--id", "LD-missing-kind", "--requirement-file", onboardingRequirement, "--design-context", "=fixtures/tokens.md"], 1);
+  assert.match(missingKind.error, /Design context kind is required/);
+  assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-missing-kind")), false);
+  const unknownKind = runAt(onboardingWorkspace, ["start", "--id", "LD-unknown-kind", "--requirement-file", onboardingRequirement, "--design-context", "unknown=fixtures/tokens.md"], 1);
+  assert.match(unknownKind.error, /Unknown design context kind/);
+  assert.deepEqual(unknownKind.details, {
+    kind: "unknown",
+    supportedKinds: ["tokens", "typography", "layout", "components", "reference-screen", "approved-decisions", "rejected-patterns", "accessibility"],
+  });
+  assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-unknown-kind")), false);
+  const emptySource = runAt(onboardingWorkspace, ["start", "--id", "LD-empty-source", "--requirement-file", onboardingRequirement, "--design-context", "tokens="], 1);
+  assert.match(emptySource.error, /Design context source is required/);
+  assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-empty-source")), false);
+  const malformedUrl = runAt(onboardingWorkspace, ["start", "--id", "LD-malformed-url", "--force-new", "--requirement-file", onboardingRequirement, "--design-context", "layout=https://"], 1);
+  assert.match(malformedUrl.error, /valid HTTP\(S\) URL/);
+  assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-malformed-url")), false);
+  const controlCharacterUrl = runAt(onboardingWorkspace, ["start", "--id", "LD-control-character-url", "--force-new", "--requirement-file", onboardingRequirement, "--design-context", "layout=https://example.test/x\n\n## Injected heading"], 1);
+  assert.match(controlCharacterUrl.error, /control characters/);
+  assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-control-character-url")), false);
+  const absoluteOutsideSource = path.join(symlinkOutside, "absolute-outside.md");
+  fs.writeFileSync(absoluteOutsideSource, "Outside absolute reference.\n");
+  const absoluteOutside = runAt(onboardingWorkspace, ["start", "--id", "LD-absolute-outside", "--force-new", "--requirement-file", onboardingRequirement, "--ref", absoluteOutsideSource], 1);
+  assert.match(absoluteOutside.error, /design context source must stay inside the workspace/);
+  assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-absolute-outside")), false);
+  const absoluteInsideSource = fs.realpathSync(path.join(onboardingWorkspace, "fixtures", "reference-screen.md"));
+  const absoluteInside = runAt(onboardingWorkspace, ["start", "--id", "LD-absolute-inside", "--force-new", "--requirement-file", onboardingRequirement, "--ref", absoluteInsideSource]);
+  assert.equal(absoluteInside.designContextSummary.sourceCount, 1);
+  assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-absolute-inside", "state.json")), true);
+  const duplicateSource = runAt(onboardingWorkspace, ["start", "--id", "LD-duplicate-source", "--requirement-file", onboardingRequirement, "--ref", "fixtures/reference-screen.md", "--ref", "fixtures/reference-screen.md"], 1);
+  assert.match(duplicateSource.error, /Duplicate design context kind\/source/);
+  assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-duplicate-source")), false);
+  const duplicateLexicalAlias = runAt(onboardingWorkspace, ["start", "--id", "LD-duplicate-lexical-alias", "--force-new", "--requirement-file", onboardingRequirement, "--ref", "fixtures/reference-screen.md", "--ref", "./fixtures/reference-screen.md"], 1);
+  assert.match(duplicateLexicalAlias.error, /Duplicate design context kind\/source/);
+  assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-duplicate-lexical-alias")), false);
+  const duplicateSymlinkAlias = runAt(onboardingWorkspace, ["start", "--id", "LD-duplicate-symlink-alias", "--force-new", "--requirement-file", onboardingRequirement, "--ref", "fixtures/reference-screen.md", "--ref", "fixtures/reference-screen-link.md"], 1);
+  assert.match(duplicateSymlinkAlias.error, /Duplicate design context kind\/source/);
+  assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-duplicate-symlink-alias")), false);
+  const missingLocal = runAt(onboardingWorkspace, ["start", "--id", "LD-missing-local", "--requirement-file", onboardingRequirement, "--ref", "fixtures/missing.md"], 1);
+  assert.match(missingLocal.error, /Design context source must be an existing local file/);
+  assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-missing-local")), false);
+  const unreadableSource = path.join(onboardingWorkspace, "fixtures", "unreadable.md");
+  fs.writeFileSync(unreadableSource, "Unreadable reference.\n");
+  fs.chmodSync(unreadableSource, 0o000);
+  let fixtureIsUnreadable = false;
+  try { fs.accessSync(unreadableSource, fs.constants.R_OK); } catch { fixtureIsUnreadable = true; }
+  const unreadableLocal = fixtureIsUnreadable
+    ? runAt(onboardingWorkspace, ["start", "--id", "LD-unreadable-local", "--requirement-file", onboardingRequirement, "--ref", "fixtures/unreadable.md", "--force-new"], 1)
+    : null;
+  fs.chmodSync(unreadableSource, 0o644);
+  if (unreadableLocal) {
+    assert.match(unreadableLocal.error, /Design context source must be a readable local file/);
+    assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-unreadable-local")), false);
+  }
+  const parentEscape = runAt(onboardingWorkspace, ["start", "--id", "LD-parent-escape", "--requirement-file", onboardingRequirement, "--ref", "../escape.md"], 1);
+  assert.match(parentEscape.error, /design context source must stay inside the workspace/);
+  assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-parent-escape")), false);
+  fs.writeFileSync(path.join(symlinkOutside, "reference.md"), "Outside reference.\n");
+  fs.symlinkSync(symlinkOutside, path.join(onboardingWorkspace, "fixtures", "outside-link"));
+  const symlinkEscape = runAt(onboardingWorkspace, ["start", "--id", "LD-symlink-escape", "--requirement-file", onboardingRequirement, "--ref", "fixtures/outside-link/reference.md"], 1);
+  assert.match(symlinkEscape.error, /design context source escapes the workspace through a symlink/);
+  assert.equal(fs.existsSync(path.join(onboardingWorkspace, "runs", "LD-symlink-escape")), false);
+
   const initialized = run(["init"]);
   assert.equal(initialized.action, "init");
   assert.equal(fs.existsSync(path.join(workspace, "loop-designing.config.json")), true);
-  assert.deepEqual(initialized.generatedPaths, ["loop-designing.config.json"]);
+  assert.deepEqual(initialized.generatedPaths, ["loop-designing.config.json", "project-context.md"]);
+  assert.equal(fs.existsSync(path.join(workspace, "project-context.md")), true);
   assert.equal(fs.existsSync(path.join(workspace, "loop-designing")), false);
   write("principles.md", "# Principles\n\nPrefer calm hierarchy.\n");
   write("src/candidate.txt", "before\n");
@@ -75,11 +254,18 @@ try {
     checkEnvAllowlist: ["LOOP_ALLOWED"],
   }, null, 2)}\n`);
   const requirement = write("fixtures/requirement.md", "Design a calmer account overview.\n");
+  write("fixtures/reference-screen.png", Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"));
+  const referenceScreen = "fixtures/reference-screen.png";
   assert.equal(spawnSync("git", ["init"], { cwd: workspace }).status, 0);
   assert.equal(spawnSync("git", ["add", "."], { cwd: workspace }).status, 0);
   assert.equal(spawnSync("git", ["-c", "user.name=Loop Test", "-c", "user.email=loop@example.test", "commit", "-m", "baseline"], { cwd: workspace }).status, 0);
-  const started = run(["start", "--id", "LD-test-1", "--requirement-file", requirement, "--tag", "account"]);
+  const started = run(["start", "--id", "LD-test-1", "--requirement-file", requirement, "--tag", "account", "--ref", referenceScreen]);
   assert.equal(started.state, "awaiting-concepts");
+  assert.equal(started.designContextSummary.sourceCount, 1);
+  assert.deepEqual(started.designContextSummary.suppliedKinds, ["reference-screen"]);
+  assert.deepEqual(started.designContextSummary.missingGroups, ["design-system", "design-rules"]);
+  assert.equal(typeof started.designContextSummary.sparseWarning, "string");
+  assert.notEqual(started.designContextSummary.sparseWarning.length, 0);
   assert.doesNotMatch(fs.readFileSync(path.join(workspace, started.context), "utf8"), /LEGACY ENTRY MUST NOT BE RETRIEVED/);
 
   const earlySummary = write("fixtures/too-early.md", "Not allowed yet.\n");
@@ -200,14 +386,82 @@ try {
   assert.equal(fs.readFileSync(path.join(workspace, "runs/LD-test-1/verdict/iteration-1-attempt-1.md"), "utf8"), verdictText);
 
   const requirementTwo = write("fixtures/requirement-2.md", "Refine the account action hierarchy.\n");
-  const second = run(["start", "--id", "LD-test-2", "--requirement-file", requirementTwo, "--tag", "account"]);
+  const second = run(["start", "--id", "LD-test-2", "--requirement-file", requirementTwo, "--tag", "account", "--ref", referenceScreen]);
   const context = fs.readFileSync(path.join(workspace, second.context), "utf8");
   assert.match(context, /Use one dominant focal action on account surfaces/);
   assert.equal(run(["concepts", "--run", "LD-test-2", "--manifest", conceptManifest]).state, "awaiting-critique");
   assert.equal(run(["critique", "--run", "LD-test-2", "--decision", "select", "--selection", "A", "--notes-file", critique]).state, "awaiting-implementation");
   assert.equal(run(["implemented", "--run", "LD-test-2", "--summary-file", summary, "--targets-manifest", targets, "--evidence", evidence]).state, "awaiting-evaluation");
-  assert.equal(evaluate("LD-test-2").state, "awaiting-evaluation-report");
+  const implementationRevisionText = "\nMove the primary action below the balance.\nPreserve the exact label: **Transfer now**.\n\n";
+  const implementationRevision = write("fixtures/implementation-revision.md", implementationRevisionText);
+  const preEvaluationRevision = run(["revise-implementation", "--run", "LD-test-2", "--notes-file", implementationRevision]);
+  assert.equal(preEvaluationRevision.state, "awaiting-implementation");
+  const revisionReady = run(["status", "--run", "LD-test-2"]).run;
+  assert.equal(revisionReady.implementationAttempt, 1);
+  assert.equal(revisionReady.selectedConcept.id, "A");
+  assert.match(revisionReady.implementationRevision, /revision-request\.md$/);
+  assert.equal(fs.readFileSync(path.join(workspace, revisionReady.implementationRevision), "utf8"), implementationRevisionText);
+  const revisedImplementation = run(["implemented", "--run", "LD-test-2", "--summary-file", summary, "--targets-manifest", targets, "--evidence", evidence]);
+  assert.equal(revisedImplementation.state, "awaiting-evaluation");
+  const revisedImplementationDir = path.join(workspace, revisedImplementation.implementation);
+  const revisedProvenance = JSON.parse(fs.readFileSync(path.join(revisedImplementationDir, "provenance.json"), "utf8"));
+  const archivedImplementationRevision = path.join(workspace, revisedProvenance.revision.path);
+  assert.equal(fs.readFileSync(archivedImplementationRevision, "utf8"), implementationRevisionText);
+  assert.deepEqual(revisedProvenance.revision, {
+    path: path.relative(workspace, archivedImplementationRevision).split(path.sep).join("/"),
+    sha256: createHash("sha256").update(implementationRevisionText).digest("hex"),
+  });
+  assert.equal(run(["status", "--run", "LD-test-2"]).run.implementationRevision, null);
+
+  const secondImplementationRevisionText = "\nKeep the action below the balance.\nChange the exact label to: **Schedule transfer**.\n\n";
+  const secondImplementationRevision = write("fixtures/second-implementation-revision.md", secondImplementationRevisionText);
+  const secondPreEvaluationRevision = run(["revise-implementation", "--run", "LD-test-2", "--notes-file", secondImplementationRevision]);
+  assert.equal(secondPreEvaluationRevision.state, "awaiting-implementation");
+  assert.equal(path.basename(archivedImplementationRevision), "incorporated-revision.md");
+  assert.equal(fs.readFileSync(archivedImplementationRevision, "utf8"), implementationRevisionText);
+  const secondRevisionReady = run(["status", "--run", "LD-test-2"]).run;
+  assert.equal(secondRevisionReady.implementationAttempt, 2);
+  assert.equal(secondRevisionReady.implementationRevision, path.relative(workspace, path.join(revisedImplementationDir, "revision-request.md")).split(path.sep).join("/"));
+  assert.equal(fs.readFileSync(path.join(workspace, secondRevisionReady.implementationRevision), "utf8"), secondImplementationRevisionText);
+
+  const twiceRevisedImplementation = run(["implemented", "--run", "LD-test-2", "--summary-file", summary, "--targets-manifest", targets, "--evidence", evidence]);
+  assert.equal(twiceRevisedImplementation.state, "awaiting-evaluation");
+  const twiceRevisedImplementationDir = path.join(workspace, twiceRevisedImplementation.implementation);
+  const twiceRevisedProvenance = JSON.parse(fs.readFileSync(path.join(twiceRevisedImplementationDir, "provenance.json"), "utf8"));
+  const secondArchivedImplementationRevision = path.join(workspace, twiceRevisedProvenance.revision.path);
+  assert.deepEqual(twiceRevisedProvenance.revision, {
+    path: path.relative(workspace, secondArchivedImplementationRevision).split(path.sep).join("/"),
+    sha256: createHash("sha256").update(secondImplementationRevisionText).digest("hex"),
+  });
+  assert.notEqual(twiceRevisedProvenance.revision.sha256, revisedProvenance.revision.sha256);
+  assert.equal(path.basename(secondArchivedImplementationRevision), "incorporated-revision.md");
+  assert.equal(fs.readFileSync(secondArchivedImplementationRevision, "utf8"), secondImplementationRevisionText);
+  assert.equal(fs.readFileSync(archivedImplementationRevision, "utf8"), implementationRevisionText);
+  assert.equal(fs.readFileSync(path.join(revisedImplementationDir, "revision-request.md"), "utf8"), secondImplementationRevisionText);
+  assert.equal(run(["status", "--run", "LD-test-2"]).run.implementationRevision, null);
+
+  const revisedEvaluation = evaluate("LD-test-2");
+  assert.equal(revisedEvaluation.state, "awaiting-evaluation-report");
+  const revisedEvaluationPacket = fs.readFileSync(path.join(workspace, revisedEvaluation.packet), "utf8");
+  assert.equal(revisedEvaluationPacket.includes(secondImplementationRevisionText), true);
+  assert.equal(revisedEvaluationPacket.includes(implementationRevisionText), false);
   const emptyMemory = write("fixtures/empty-memory.json", `${JSON.stringify({ entries: [] }, null, 2)}\n`);
+  assert.equal(run(["record-evaluation", "--run", "LD-test-2", "--report", report, "--memory-proposal", emptyMemory]).state, "awaiting-verdict");
+  const beforeEvaluationRetry = run(["status", "--run", "LD-test-2"]).run;
+  const firstEvaluation = beforeEvaluationRetry.evaluation;
+  const retryEvaluationVerdict = run(["verdict", "--run", "LD-test-2", "--decision", "retry-evaluation", "--notes-file", verdict]);
+  assert.equal(retryEvaluationVerdict.state, "awaiting-evaluation");
+  const retryReady = run(["status", "--run", "LD-test-2"]).run;
+  assert.equal(retryReady.implementation, beforeEvaluationRetry.implementation);
+  assert.equal(retryReady.implementationAttempt, beforeEvaluationRetry.implementationAttempt);
+  assert.equal(retryReady.evaluationAttempt, 1);
+  const retriedEvaluation = run(["evaluate", "--run", "LD-test-2"]);
+  assert.equal(retriedEvaluation.state, "awaiting-evaluation-report");
+  assert.match(retriedEvaluation.approval, /reused/i);
+  const afterEvaluationRetry = run(["status", "--run", "LD-test-2"]).run;
+  assert.equal(afterEvaluationRetry.evaluationAttempt, 2);
+  assert.notEqual(afterEvaluationRetry.evaluation, firstEvaluation);
+  assert.equal(fs.existsSync(path.join(workspace, firstEvaluation, "report.json")), true);
   assert.equal(run(["record-evaluation", "--run", "LD-test-2", "--report", report, "--memory-proposal", emptyMemory]).state, "awaiting-verdict");
   const iterateImplementation = run(["verdict", "--run", "LD-test-2", "--decision", "iterate-implementation", "--notes-file", verdict]);
   assert.equal(iterateImplementation.state, "awaiting-implementation");
@@ -223,7 +477,7 @@ try {
   assert.equal(run(["record-evaluation", "--run", "LD-test-2", "--report", report, "--memory-proposal", emptyMemory]).state, "awaiting-verdict");
   assert.equal(run(["verdict", "--run", "LD-test-2", "--decision", "archive", "--notes-file", verdict]).state, "archived");
 
-  const third = run(["start", "--id", "LD-test-3", "--requirement-file", requirementTwo, "--tag", "account"]);
+  const third = run(["start", "--id", "LD-test-3", "--requirement-file", requirementTwo, "--tag", "account", "--ref", referenceScreen]);
   assert.equal(third.state, "awaiting-concepts");
   assert.equal(run(["concepts", "--run", "LD-test-3", "--manifest", conceptManifest]).state, "awaiting-critique");
   assert.equal(run(["critique", "--run", "LD-test-3", "--decision", "iterate", "--notes-file", critique]).state, "awaiting-concepts");
@@ -252,6 +506,16 @@ try {
     findings: [{ ruleId: "technical-check", source: "loop-designing.config.json", status: "fail", severity: "high", evidence: "intentional-failure exited with status 2." }],
   }, null, 2)}\n`);
   assert.equal(run(["record-evaluation", "--run", "LD-test-3", "--report", failReport, "--memory-proposal", emptyMemory]).state, "awaiting-verdict");
+  assert.equal(run(["verdict", "--run", "LD-test-3", "--decision", "retry-evaluation", "--notes-file", verdict]).state, "awaiting-evaluation");
+  const repairedConfig = JSON.parse(fs.readFileSync(path.join(workspace, "loop-designing.config.json"), "utf8"));
+  repairedConfig.checks = [{ id: "repaired-check", command: [process.execPath, "-e", "process.exit(0)"] }];
+  fs.writeFileSync(path.join(workspace, "loop-designing.config.json"), `${JSON.stringify(repairedConfig, null, 2)}\n`);
+  const changedCheckGate = run(["evaluate", "--run", "LD-test-3"], 1);
+  assert.match(changedCheckGate.error, /Configured checks can execute programs/);
+  const repairedEvaluation = run(["evaluate", "--run", "LD-test-3", "--checks-sha256", changedCheckGate.details.checksSha256]);
+  assert.equal(repairedEvaluation.allTechnicalChecksPassed, true);
+  assert.equal(repairedEvaluation.evaluationAttempt, 2);
+  assert.equal(run(["record-evaluation", "--run", "LD-test-3", "--report", report, "--memory-proposal", emptyMemory]).state, "awaiting-verdict");
   assert.equal(run(["verdict", "--run", "LD-test-3", "--decision", "archive", "--notes-file", verdict]).state, "archived");
 
   const guardConfig = {
@@ -266,17 +530,57 @@ try {
     checks: [],
     checkEnvAllowlist: [],
   };
+  const cleanLockConfig = { ...guardConfig, projectId: "clean-lock-test", runsDir: "loop designing runs" };
+  fs.writeFileSync(path.join(cleanLockWorkspace, "loop-designing.config.json"), `${JSON.stringify(cleanLockConfig, null, 2)}\n`);
+  fs.writeFileSync(path.join(cleanLockWorkspace, "principles.md"), "Prefer clear hierarchy.\n");
+  fs.writeFileSync(path.join(cleanLockWorkspace, "requirement.md"), "Start from a clean Git workspace.\n");
+  fs.writeFileSync(path.join(cleanLockWorkspace, "reference-screen.md"), "Clean workspace reference screen.\n");
+  assert.equal(spawnSync("git", ["init"], { cwd: cleanLockWorkspace }).status, 0);
+  assert.equal(spawnSync("git", ["add", "."], { cwd: cleanLockWorkspace }).status, 0);
+  assert.equal(spawnSync("git", ["-c", "user.name=Loop Test", "-c", "user.email=loop@example.test", "commit", "-m", "baseline"], { cwd: cleanLockWorkspace }).status, 0);
+  const cleanLockStarted = runAt(cleanLockWorkspace, ["start", "--id", "LD-clean-lock", "--requirement-file", path.join(cleanLockWorkspace, "requirement.md"), "--ref", "reference-screen.md"]);
+  assert.equal(cleanLockStarted.state, "awaiting-concepts");
+  const cleanLockState = JSON.parse(fs.readFileSync(path.join(cleanLockWorkspace, "loop designing runs", "LD-clean-lock", "state.json"), "utf8"));
+  assert.equal(cleanLockState.baseline.status, "");
+  assert.equal(fs.existsSync(path.join(cleanLockWorkspace, "loop designing runs", ".harness.lock")), false);
+
+  const metacharacterLockConfig = { ...guardConfig, projectId: "metacharacter-lock-test", runsDir: "runs*" };
+  fs.writeFileSync(path.join(metacharacterLockWorkspace, "loop-designing.config.json"), `${JSON.stringify(metacharacterLockConfig, null, 2)}\n`);
+  fs.writeFileSync(path.join(metacharacterLockWorkspace, "principles.md"), "Prefer clear hierarchy.\n");
+  fs.writeFileSync(path.join(metacharacterLockWorkspace, "requirement.md"), "Keep user files visible.\n");
+  fs.writeFileSync(path.join(metacharacterLockWorkspace, "reference-screen.md"), "Metacharacter workspace reference screen.\n");
+  fs.mkdirSync(path.join(metacharacterLockWorkspace, "runsA"));
+  fs.writeFileSync(path.join(metacharacterLockWorkspace, "runsA", "candidate.txt"), "before\n");
+  assert.equal(spawnSync("git", ["init"], { cwd: metacharacterLockWorkspace }).status, 0);
+  assert.equal(spawnSync("git", ["add", "."], { cwd: metacharacterLockWorkspace }).status, 0);
+  assert.equal(spawnSync("git", ["-c", "user.name=Loop Test", "-c", "user.email=loop@example.test", "commit", "-m", "baseline"], { cwd: metacharacterLockWorkspace }).status, 0);
+  fs.writeFileSync(path.join(metacharacterLockWorkspace, "runsA", "candidate.txt"), "after\n");
+  fs.writeFileSync(path.join(metacharacterLockWorkspace, "runsA", ".harness.lock"), "user file\n");
+  const metacharacterDirtyBlocked = runAt(metacharacterLockWorkspace, ["start", "--id", "LD-metacharacter-lock", "--requirement-file", path.join(metacharacterLockWorkspace, "requirement.md"), "--ref", "reference-screen.md"], 1);
+  assert.match(metacharacterDirtyBlocked.error, /uncommitted changes/);
+  assert.match(metacharacterDirtyBlocked.details, /runsA/);
+  const metacharacterDirtyAllowed = runAt(metacharacterLockWorkspace, ["start", "--id", "LD-metacharacter-lock", "--allow-dirty", "--requirement-file", path.join(metacharacterLockWorkspace, "requirement.md"), "--ref", "reference-screen.md"]);
+  const metacharacterLockState = JSON.parse(fs.readFileSync(path.join(metacharacterLockWorkspace, "runs*", "LD-metacharacter-lock", "state.json"), "utf8"));
+  assert.match(metacharacterLockState.baseline.status, /runsA/);
+  assert.equal(metacharacterDirtyAllowed.state, "awaiting-concepts");
+  assert.equal(runAt(metacharacterLockWorkspace, ["concepts", "--run", "LD-metacharacter-lock", "--manifest", conceptManifest]).state, "awaiting-critique");
+  assert.equal(runAt(metacharacterLockWorkspace, ["critique", "--run", "LD-metacharacter-lock", "--decision", "select", "--selection", "A", "--notes-file", critique]).state, "awaiting-implementation");
+  const metacharacterImplementation = runAt(metacharacterLockWorkspace, ["implemented", "--run", "LD-metacharacter-lock", "--summary-file", summary, "--targets-manifest", targets, "--evidence", evidence]);
+  const metacharacterDiff = fs.readFileSync(path.join(metacharacterLockWorkspace, metacharacterImplementation.implementation, "changes.diff"), "utf8");
+  assert.match(metacharacterDiff, /runsA\/candidate\.txt/);
+
   fs.writeFileSync(path.join(guardWorkspace, "loop-designing.config.json"), `${JSON.stringify(guardConfig, null, 2)}\n`);
   fs.writeFileSync(path.join(guardWorkspace, "principles.md"), "Prefer clear hierarchy.\n");
   fs.writeFileSync(path.join(guardWorkspace, "requirement.md"), "Test the dirty-worktree guard.\n");
+  fs.writeFileSync(path.join(guardWorkspace, "reference-screen.md"), "Guard reference screen.\n");
   assert.equal(spawnSync("git", ["init"], { cwd: guardWorkspace }).status, 0);
   assert.equal(spawnSync("git", ["add", "."], { cwd: guardWorkspace }).status, 0);
   assert.equal(spawnSync("git", ["-c", "user.name=Loop Test", "-c", "user.email=loop@example.test", "commit", "-m", "baseline"], { cwd: guardWorkspace }).status, 0);
   fs.writeFileSync(path.join(guardWorkspace, "dirty.txt"), "unrelated change\n");
-  const dirtyBlocked = runAt(guardWorkspace, ["start", "--id", "LD-guard", "--requirement-file", path.join(guardWorkspace, "requirement.md")], 1);
+  const dirtyBlocked = runAt(guardWorkspace, ["start", "--id", "LD-guard", "--requirement-file", path.join(guardWorkspace, "requirement.md"), "--ref", "reference-screen.md"], 1);
   assert.match(dirtyBlocked.error, /uncommitted changes/);
   fs.writeFileSync(path.join(guardWorkspace, "runs", ".harness.lock"), "held\n");
-  const locked = runAt(guardWorkspace, ["start", "--id", "LD-locked", "--requirement-file", path.join(guardWorkspace, "requirement.md"), "--allow-dirty"], 1);
+  const locked = runAt(guardWorkspace, ["start", "--id", "LD-locked", "--requirement-file", path.join(guardWorkspace, "requirement.md"), "--ref", "reference-screen.md", "--allow-dirty"], 1);
   assert.match(locked.error, /transition is in progress/);
   fs.unlinkSync(path.join(guardWorkspace, "runs", ".harness.lock"));
 
@@ -301,11 +605,63 @@ try {
   const invalidCount = runAt(invalidWorkspace, ["status"], 1);
   assert.match(invalidCount.error, /conceptCount must be exactly 3/);
 
+  const memoryAliasConfig = {
+    ...guardConfig,
+    projectId: "memory-alias-test",
+    requireCleanWorktree: false,
+    contextFiles: [],
+    memory: { approved: "memory/shared.jsonl", rejected: "memory/shared.jsonl" },
+  };
+  fs.writeFileSync(path.join(memoryAliasWorkspace, "loop-designing.config.json"), `${JSON.stringify(memoryAliasConfig, null, 2)}\n`);
+  const identicalMemoryStores = runAt(memoryAliasWorkspace, ["status"], 1);
+  assert.match(identicalMemoryStores.error, /approved and rejected memory stores must resolve to different files/);
+  fs.mkdirSync(path.join(memoryAliasWorkspace, "memory"), { recursive: true });
+  fs.writeFileSync(path.join(memoryAliasWorkspace, "memory", "approved.jsonl"), "");
+  fs.symlinkSync(path.join(memoryAliasWorkspace, "memory", "approved.jsonl"), path.join(memoryAliasWorkspace, "memory", "rejected.jsonl"));
+  memoryAliasConfig.memory = { approved: "memory/approved.jsonl", rejected: "memory/rejected.jsonl" };
+  fs.writeFileSync(path.join(memoryAliasWorkspace, "loop-designing.config.json"), `${JSON.stringify(memoryAliasConfig, null, 2)}\n`);
+  const aliasedMemoryStores = runAt(memoryAliasWorkspace, ["status"], 1);
+  assert.match(aliasedMemoryStores.error, /approved and rejected memory stores must resolve to different files/);
+  fs.unlinkSync(path.join(memoryAliasWorkspace, "memory", "rejected.jsonl"));
+  fs.linkSync(path.join(memoryAliasWorkspace, "memory", "approved.jsonl"), path.join(memoryAliasWorkspace, "memory", "rejected-hardlink.jsonl"));
+  memoryAliasConfig.memory = { approved: "memory/approved.jsonl", rejected: "memory/rejected-hardlink.jsonl" };
+  fs.writeFileSync(path.join(memoryAliasWorkspace, "loop-designing.config.json"), `${JSON.stringify(memoryAliasConfig, null, 2)}\n`);
+  const hardlinkedMemoryStores = runAt(memoryAliasWorkspace, ["status"], 1);
+  assert.match(hardlinkedMemoryStores.error, /approved and rejected memory stores must resolve to different files/);
+  memoryAliasConfig.memory = { approved: "memory/Future.jsonl", rejected: "memory/future.jsonl" };
+  fs.writeFileSync(path.join(memoryAliasWorkspace, "loop-designing.config.json"), `${JSON.stringify(memoryAliasConfig, null, 2)}\n`);
+  const caseEquivalentMemoryStores = runAt(memoryAliasWorkspace, ["status"], 1);
+  assert.match(caseEquivalentMemoryStores.error, /approved and rejected memory stores must resolve to different files/);
+
+  fs.writeFileSync(path.join(symlinkOutside, "escaped-context.md"), "Escaped product canon.\n");
+  fs.symlinkSync(symlinkOutside, path.join(transactionalStartWorkspace, "context-link"));
+  fs.writeFileSync(path.join(transactionalStartWorkspace, "reference-screen.md"), "Local reference.\n");
+  fs.writeFileSync(path.join(transactionalStartWorkspace, "requirement.md"), "Do not leave a partial run.\n");
+  fs.writeFileSync(path.join(transactionalStartWorkspace, "loop-designing.config.json"), `${JSON.stringify({
+    ...guardConfig,
+    projectId: "transactional-start-test",
+    requireCleanWorktree: false,
+    contextFiles: ["context-link/escaped-context.md"],
+  }, null, 2)}\n`);
+  const escapedContextStart = runAt(transactionalStartWorkspace, [
+    "start", "--id", "LD-partial", "--requirement-file", "requirement.md", "--ref", "reference-screen.md",
+  ], 1);
+  assert.match(escapedContextStart.error, /context file escapes the workspace through a symlink/);
+  assert.equal(fs.existsSync(path.join(transactionalStartWorkspace, "runs", "LD-partial")), false);
+  assert.equal(fs.existsSync(path.join(transactionalStartWorkspace, "memory", "approved.jsonl")), false);
+  assert.equal(fs.existsSync(path.join(transactionalStartWorkspace, "memory", "rejected.jsonl")), false);
+
   process.stdout.write("Loop Designing harness test passed.\n");
 } finally {
   fs.rmSync(workspace, { recursive: true, force: true });
   fs.rmSync(guardWorkspace, { recursive: true, force: true });
+  fs.rmSync(cleanLockWorkspace, { recursive: true, force: true });
+  fs.rmSync(metacharacterLockWorkspace, { recursive: true, force: true });
   fs.rmSync(invalidWorkspace, { recursive: true, force: true });
   fs.rmSync(symlinkWorkspace, { recursive: true, force: true });
   fs.rmSync(symlinkOutside, { recursive: true, force: true });
+  fs.rmSync(onboardingWorkspace, { recursive: true, force: true });
+  fs.rmSync(concurrentInitWorkspace, { recursive: true, force: true });
+  fs.rmSync(memoryAliasWorkspace, { recursive: true, force: true });
+  fs.rmSync(transactionalStartWorkspace, { recursive: true, force: true });
 }

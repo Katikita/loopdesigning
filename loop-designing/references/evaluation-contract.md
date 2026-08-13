@@ -19,7 +19,9 @@ Read the packet before inspecting the UI. Inspect visual evidence or the running
 
 Prepare the structured memory proposal before requesting the final human verdict. Register an explicit empty proposal when there is no reusable learning. The human must see the exact stored proposal alongside the evaluation and explicitly approve or skip it; its hash is verified again at approval time.
 
-Configured checks are repository-controlled programs. The first evaluation call returns their exact commands, environment allowlist, timeout, and fingerprint without running them. Show these to the human and proceed only after explicit approval of that fingerprint. A changed configuration requires new approval.
+Configured checks are repository-controlled programs. An evaluation call with no matching approval returns their exact commands, environment allowlist, timeout, and fingerprint without running them. Show these to the human and proceed only after explicit approval of that fingerprint. The same approval may be reused within the run while the fingerprint is unchanged; a changed command, timeout, or environment allowlist requires new approval.
+
+When a failure belongs to the check configuration, check environment, or evaluation report rather than the implementation, record `retry-evaluation`. The harness preserves the selected concept and implementation, retains the earlier evidence, and writes the next attempt to a distinct evaluation directory. Do not mislabel this route as implementation iteration.
 
 ## Report schema
 
