@@ -45,4 +45,3 @@ The agent running QA may not select a concept or pass its own work. Completion t
 - Do not make `project-context.md` mandatory.
 - Do not fetch URL design references.
 - Do not weaken any existing human, command-approval, provenance, or memory gate.
-
